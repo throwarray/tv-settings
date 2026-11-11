@@ -1,0 +1,11 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <style name="Theme.TVSettings" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:colorBackground">@color/tv_background</item>
+        <item name="android:windowBackground">@color/tv_background</item>
+        <item name="colorPrimary">@color/tv_primary</item>
+        <item name="colorSurface">@color/tv_surface</item>
+        <item name="android:textColorPrimary">@color/tv_text</item>
+        <item name="android:statusBarColor">@android:color/black</item>
+        <item name="android:navigationBarColor">@android:color/black</item>
+    </style>
+</resources>

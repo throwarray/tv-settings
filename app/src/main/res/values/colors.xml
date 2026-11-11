@@ -1,0 +1,7 @@
+<resources>
+    <color name="tv_primary">#1F6BFF</color>
+    <color name="tv_background">#000000</color>
+    <color name="tv_surface">#000000</color>
+    <color name="tv_text">#FFFFFF</color>
+    <color name="ic_launcher_background">#37474F</color>
+</resources>

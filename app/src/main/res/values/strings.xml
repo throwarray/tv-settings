@@ -1,0 +1,15 @@
+<resources>
+    <string name="app_name">TV Settings</string>
+    <string name="overlay_service_description">Draws the VPN status dot and the remote-driven mouse cursor. Double-press Play toggles the mouse.</string>
+    <string name="overlay_service_label">TV Settings overlay</string>
+    <string name="mouse_on">Mouse on. Clicks need Shizuku running</string>
+    <string name="mouse_off">Mouse off</string>
+    <string name="shell_failed">Shizuku command failed</string>
+    <string name="mock_location_channel">Mock location</string>
+    <string name="mock_location_title">Mock location</string>
+    <string name="help_title">TV Settings</string>
+    <string name="help_features">* needs Shizuku\n\nApps: filter, sort and search. Running apps show CPU and RAM; the header shows device totals.\n\nSelected app: Details, Actions (launch, app info, view manifest, backup APK, enable or disable, clear data, uninstall, force stop), Permissions, VPN, services and activities. OK on an activity opens its options.\n\nAdvanced: every section collapses. Status, Network, Privacy, Screensaver / Appearance, Location, Mouse Toggle, Home redirect, Install APK and Diagnostics.\n\nHome redirect: Home opens the launch app from the stock home. A second press during the delay stays on stock.\n\nWidget: CPU and RAM for your launcher.</string>
+    <string name="enforcer_channel">Accessibility keep-alive</string>
+    <string name="enforcer_title">Keeping the accessibility service on</string>
+    <string name="usage_widget_description">Global CPU and RAM usage</string>
+</resources>
