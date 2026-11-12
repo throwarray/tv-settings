@@ -7,8 +7,14 @@ import android.provider.Settings
  * A 0/1 setting shown as a toggle. On always means the private choice, so settings where 1 turns collection
  * on are [inverted]: on writes 0.
  */
-data class FlagSetting(val key: String, val title: String, val inverted: Boolean = false) {
+data class FlagSetting(
+    val key: String,
+    val titleRes: Int,
+    val inverted: Boolean = false,
+    val also: List<String> = emptyList(),
+) {
     val subtitle: String get() = "$key (on = ${if (inverted) 0 else 1})"
+    val allKeys: List<String> get() = listOf(key) + also
 
     fun stateOf(raw: String?): Boolean = if (inverted) raw == "0" else raw == "1"
 
@@ -18,15 +24,12 @@ data class FlagSetting(val key: String, val title: String, val inverted: Boolean
 /** Settings addressed by key alone. The table is the one the key already lives in, secure if it isn't set yet. */
 object KeySettings {
     val privacy = listOf(
-        FlagSetting("limit_ad_tracking", "Limit ad tracking"),
-        FlagSetting("amz_limit_ad_tracking", "Limit Amazon tailored ads"),
-        FlagSetting("non_amz_limit_ad_tracking", "Limit non-Amazon tailored ads"),
-        FlagSetting("alexa_wake_word_disabled", "Disable Alexa wake word"),
-        FlagSetting("usage_metrics_marketing_enabled", "Disable marketing usage metrics", inverted = true),
-        FlagSetting("USAGE_METRICS_UPLOAD_ENABLED", "Disable usage metrics upload", inverted = true),
-        FlagSetting("ambient_motion_detection", "Disable ambient motion detection", inverted = true),
-        FlagSetting("settingsApp:appUsageData:value", "Disable app usage data", inverted = true),
-        FlagSetting("settingsApp:deviceUsageData:value", "Disable device usage data", inverted = true),
+        FlagSetting("limit_ad_tracking", R.string.privacy_limit_ad_tracking,
+            also = listOf("amz_limit_ad_tracking", "non_amz_limit_ad_tracking")),
+        FlagSetting("alexa_wake_word_disabled", R.string.privacy_disable_alexa_wake_word),
+        FlagSetting("usage_metrics_marketing_enabled", R.string.privacy_disable_usage_metrics, inverted = true,
+            also = listOf("USAGE_METRICS_UPLOAD_ENABLED", "settingsApp:appUsageData:value", "settingsApp:deviceUsageData:value")),
+        FlagSetting("ambient_motion_detection", R.string.privacy_disable_ambient_motion, inverted = true),
     )
 
     private fun table(context: Context, key: String): String {

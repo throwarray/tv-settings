@@ -300,7 +300,7 @@ fun ActivityRow(
             }
             Icon(
                 imageVector = if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                contentDescription = if (open) "Hide options" else "Show options",
+                contentDescription = context.getString(if (open) R.string.hide_options else R.string.show_options),
                 tint = Oled.textSecondary,
                 modifier = Modifier.size(20.dp),
             )
@@ -312,21 +312,21 @@ fun ActivityRow(
             ) {
                 Box(modifier = Modifier.focusRequester(launchFocus)) {
                     ActionRow(
-                        "Launch", Icons.Default.PlayArrow,
-                        subtitle = if (entry.starred) "* needs Shizuku running" else null,
+                        context.getString(R.string.launch), Icons.Default.PlayArrow,
+                        subtitle = if (entry.starred) context.getString(R.string.privileged_activity_subtitle) else null,
                     ) { ActivityList.launch(context, pkg, entry.className, entry.starred) }
                 }
                 ActionRow(
-                    "Create shortcut", Icons.Default.Add,
-                    subtitle = if (entry.starred) "* needs Shizuku running" else null,
+                    context.getString(R.string.create_shortcut), Icons.Default.Add,
+                    subtitle = if (entry.starred) context.getString(R.string.privileged_activity_subtitle) else null,
                 ) {
                     ActivityList.createShortcut(context, pkg, entry.className, shownLabel, pendingIcon, entry.starred)
                 }
-                ActionRow("Rename", Icons.Default.Edit) { sub = if (sub == "rename") null else "rename" }
-                ActionRow("Change icon to an app icon", Icons.Default.Star) { sub = if (sub == "icon") null else "icon" }
-                ActionRow("Change icon to an image", AppIcons.Card) { sub = if (sub == "browse") null else "browse" }
-                ActionRow("Emoji icon", Icons.Default.Star) { sub = if (sub == "emoji") null else "emoji" }
-                ActionRow("Reset", AppIcons.Undo, subtitle = "Clears the name and icon") {
+                ActionRow(context.getString(R.string.rename), Icons.Default.Edit) { sub = if (sub == "rename") null else "rename" }
+                ActionRow(context.getString(R.string.change_icon_to_app), Icons.Default.Star) { sub = if (sub == "icon") null else "icon" }
+                ActionRow(context.getString(R.string.change_icon_to_image), AppIcons.Card) { sub = if (sub == "browse") null else "browse" }
+                ActionRow(context.getString(R.string.emoji_icon), Icons.Default.Star) { sub = if (sub == "emoji") null else "emoji" }
+                ActionRow(context.getString(R.string.reset), AppIcons.Undo, subtitle = context.getString(R.string.reset_activity_label_subtitle)) {
                     onPendingIcon(null)
                     onPendingLabel(null)
                     ActivityPrefs.setLabel(context, key, null)
@@ -374,7 +374,7 @@ fun ActivityRow(
                         }
                     }
                     "browse" -> FileBrowser(
-                        title = "Choose an image",
+                        title = context.getString(R.string.choose_image),
                         start = "/sdcard",
                         dirMode = false,
                         exts = listOf(".png", ".jpg", ".jpeg", ".webp"),
@@ -390,7 +390,7 @@ fun ActivityRow(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         InlineField(
-                            value = emojiText, enabled = true, placeholder = "OK, then type an emoji",
+                            value = emojiText, enabled = true, placeholder = context.getString(R.string.emoji_entry_placeholder),
                             modifier = Modifier.weight(1f),
                         ) { text ->
                             emojiText = text.trim()

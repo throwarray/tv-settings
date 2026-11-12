@@ -8,11 +8,14 @@ import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import java.io.File
+import android.provider.OpenableColumns
 
-// Installs through PackageInstaller under REQUEST_INSTALL_PACKAGES. Shizuku is only used for the storage read grant.
+// Installs through PackageInstaller under REQUEST_INSTALL_PACKAGES. Shizuku can grant that app-op once.
 object ApkInstaller {
-    fun prepareAndInstall(context: Context, path: String): Boolean {
+    fun prepareAndInstall(context: Context, uri: Uri): Boolean {
+        if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls() && ShizukuManager.isReady) {
+            Shell.appOpsSet(context.packageName, "REQUEST_INSTALL_PACKAGES", "allow")
+        }
         if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
             context.startActivity(
                 Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
@@ -20,23 +23,31 @@ object ApkInstaller {
             )
             return false
         }
-        if (ShizukuManager.isReady) Shell.permission(context.packageName, "android.permission.READ_EXTERNAL_STORAGE", true)
-        val apk = File(path)
-        if (!apk.canRead()) return false
-        val pi = context.packageManager.packageInstaller
-        val id = pi.createSession(PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL))
-        pi.openSession(id).use { session ->
-            session.openWrite("base.apk", 0, apk.length()).use { out ->
-                apk.inputStream().use { it.copyTo(out) }
-                session.fsync(out)
+        val input = context.contentResolver.openInputStream(uri) ?: return false
+        input.use { apkInput ->
+            val pi = context.packageManager.packageInstaller
+            val id = pi.createSession(PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL))
+            pi.openSession(id).use { session ->
+                session.openWrite("base.apk", 0, -1).use { out ->
+                    apkInput.copyTo(out)
+                    session.fsync(out)
+                }
+                val result = Intent(context, InstallResultReceiver::class.java)
+                val pending = PendingIntent.getBroadcast(
+                    context, id, result, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
+                )
+                session.commit(pending.intentSender)
             }
-            val result = Intent(context, InstallResultReceiver::class.java)
-            val pending = PendingIntent.getBroadcast(
-                context, id, result, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE,
-            )
-            session.commit(pending.intentSender)
         }
         return true
+    }
+
+    fun displayName(context: Context, uri: Uri): String = try {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) cursor.getString(0) else null
+        } ?: uri.lastPathSegment ?: context.getString(R.string.choose_apk_title)
+    } catch (_: Exception) {
+        uri.lastPathSegment ?: context.getString(R.string.choose_apk_title)
     }
 }
 
@@ -51,4 +62,11 @@ class InstallResultReceiver : BroadcastReceiver() {
             else -> context.toast("Install failed: ${intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE)}")
         }
     }
+}
+
+// The document picker grants temporary read access to the selected APK, independent of Shizuku.
+fun ApkInstaller.installFromUri(context: Context, uri: Uri): Boolean = try {
+    prepareAndInstall(context, uri)
+} catch (_: Throwable) {
+    false
 }

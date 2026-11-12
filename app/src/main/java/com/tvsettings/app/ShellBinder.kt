@@ -38,7 +38,7 @@ class ShellBinder : Binder() {
     fun runCommand(command: String): String {
         return try {
             val wrapped = "( $command ) 2>&1; status=\$?; printf '\\n__EXIT_CODE__:%s\\n' \"\$status\""
-            val process = ProcessBuilder("sh", "-c", wrapped)
+            val process = ProcessBuilder("sh", "-c", "export PATH=/system/bin:/system/xbin:\$PATH; " + wrapped)
                 .redirectErrorStream(true)
                 .start()
 

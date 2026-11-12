@@ -23,6 +23,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
@@ -66,9 +67,9 @@ fun FileBrowser(
             }
         },
         confirmButton = {
-            if (dirMode) TextButton(onClick = { onPick(path) }) { Text("Use this folder", color = Oled.textPrimary) }
+            if (dirMode) TextButton(onClick = { onPick(path) }) { Text(stringResource(R.string.use_this_folder), color = Oled.textPrimary) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Oled.textPrimary) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel), color = Oled.textPrimary) } },
         containerColor = Oled.card,
     )
 }

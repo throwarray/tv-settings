@@ -1,5 +1,8 @@
 package com.tvsettings.app
 
+import android.provider.Settings
+import android.net.Uri
+import android.content.Intent
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
@@ -46,10 +49,23 @@ object AppBackup {
         val pm = context.packageManager
         val info = pm.getPackageInfo(pkg, 0)
         val src = pm.getApplicationInfo(pkg, 0).sourceDir
-        if (!Regex("[A-Za-z0-9_./-]+").matches(src)) return false to "unexpected path"
+        if (src.contains('\'')) return false to "unexpected path"
         val code = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
         val dest = "$dir/${pkg}_v$code.apk"
         val ok = Shell.exec("cp '$src' '$dest'").ok
         return ok to dest
+    }
+}
+
+object AppSettingsLinks {
+    fun open(context: Context, pkg: String, permission: String) {
+        val action = when (permission.substringAfterLast('.')) {
+            "REQUEST_INSTALL_PACKAGES" -> Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES
+            "PACKAGE_USAGE_STATS" -> Settings.ACTION_USAGE_ACCESS_SETTINGS
+            "SYSTEM_ALERT_WINDOW" -> Settings.ACTION_MANAGE_OVERLAY_PERMISSION
+            "WRITE_SETTINGS" -> Settings.ACTION_MANAGE_WRITE_SETTINGS
+            else -> Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+        }
+        context.startActivity(Intent(action, Uri.parse("package:$pkg")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }

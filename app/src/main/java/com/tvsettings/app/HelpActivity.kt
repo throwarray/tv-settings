@@ -1,5 +1,9 @@
 package com.tvsettings.app
 
+import android.net.Uri
+import android.content.Intent
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.clickable
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -43,6 +47,7 @@ class HelpActivity : ComponentActivity() {
 
 @Composable
 fun HelpScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -64,6 +69,19 @@ fun HelpScreen(onBack: () -> Unit) {
             CompactIconButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back") { onBack() }
         }
         Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            "Source: github.com/throwarray/tv-settings",
+            color = Oled.textPrimary, fontSize = 12.sp,
+            modifier = Modifier
+                .focusable()
+                .clickable {
+                    context.startActivity(
+                        Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/throwarray/tv-settings"))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                }
+                .padding(horizontal = 4.dp, vertical = 2.dp),
+        )
         Card(
             modifier = Modifier.widthIn(max = Dimens.advancedMaxWidth).fillMaxSize(),
             colors = CardDefaults.cardColors(containerColor = Oled.card),

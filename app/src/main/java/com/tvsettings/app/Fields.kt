@@ -47,6 +47,7 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -166,14 +167,14 @@ fun CommandRow(command: String, enabled: Boolean, onChange: (String) -> Unit, on
             .padding(horizontal = 10.dp, vertical = 3.dp)
             .alpha(if (enabled) 1f else 0.5f)
     ) {
-        Text("Shell command", color = Oled.textPrimary, fontSize = 12.sp, lineHeight = 14.sp)
+        Text(stringResource(R.string.shell_command), color = Oled.textPrimary, fontSize = 12.sp, lineHeight = 14.sp)
         Spacer(modifier = Modifier.height(3.dp))
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
             InlineField(
-                value = command, enabled = enabled, placeholder = "e.g. settings get secure accessibility_enabled",
+                value = command, enabled = enabled, placeholder = stringResource(R.string.shell_command_example),
                 modifier = Modifier.weight(1f), onCommit = onChange
             )
-            CompactIconButton(Icons.Default.PlayArrow, "Run") { if (enabled) onRun() }
+            CompactIconButton(Icons.Default.PlayArrow, stringResource(R.string.run)) { if (enabled) onRun() }
         }
     }
 }
@@ -187,7 +188,7 @@ fun OutputBox(output: String) {
     val shape = RoundedCornerShape(8.dp)
     fun copy() {
         context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("output", output))
-        context.toast("Copied")
+        context.toast(context.getString(R.string.copied))
     }
     Row(
         modifier = Modifier
@@ -225,7 +226,7 @@ fun CopyButton(onClick: () -> Unit) {
             .padding(horizontal = 10.dp),
         contentAlignment = Alignment.Center
     ) {
-        Text("Copy", color = Oled.textPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+        Text(stringResource(R.string.copy), color = Oled.textPrimary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
     }
 }
 
@@ -233,7 +234,7 @@ fun CopyButton(onClick: () -> Unit) {
 @Composable
 fun CompactSearchField(value: String, onValueChange: (String) -> Unit, modifier: Modifier = Modifier) {
     InlineField(
-        value = value, enabled = true, placeholder = "Search",
+        value = value, enabled = true, placeholder = stringResource(R.string.search),
         modifier = modifier, commitOnChange = true, onCommit = onValueChange
     )
 }
@@ -247,7 +248,7 @@ fun CopyRow(label: String, value: String) {
     val shape = RoundedCornerShape(8.dp)
     fun copy() {
         context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText(label, value))
-        context.toast("Copied")
+        context.toast(context.getString(R.string.copied))
     }
     Row(
         modifier = Modifier
@@ -266,7 +267,7 @@ fun CopyRow(label: String, value: String) {
             Text(value, color = Oled.textSecondary, fontSize = 10.sp, lineHeight = 12.sp)
         }
         Box(modifier = Modifier.background(Oled.row, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp)) {
-            Text("Copy", color = Oled.textPrimary, fontSize = 10.sp)
+            Text(stringResource(R.string.copy), color = Oled.textPrimary, fontSize = 10.sp)
         }
     }
 }

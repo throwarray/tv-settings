@@ -47,6 +47,25 @@ object AppIcons {
         }
     }
 
+    val Stop: ImageVector by lazy {
+        icon("Stop") {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(6f, 6f); lineTo(18f, 6f); lineTo(18f, 18f); lineTo(6f, 18f); close()
+            }
+        }
+    }
+
+    val Backup: ImageVector by lazy {
+        icon("Backup") {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(3f, 9f); lineTo(21f, 9f); lineTo(21f, 20f); lineTo(3f, 20f); close()
+                moveTo(10f, 7f); lineTo(10f, 4f); lineTo(7f, 4f); lineTo(12f, 1f); lineTo(17f, 4f)
+                lineTo(14f, 4f); lineTo(14f, 7f); close()
+                moveTo(8f, 11f); lineTo(16f, 11f); lineTo(16f, 13f); lineTo(8f, 13f); close()
+            }
+        }
+    }
+
     val Undo: ImageVector by lazy {
         icon("Undo") {
             path(fill = SolidColor(Color.White)) {

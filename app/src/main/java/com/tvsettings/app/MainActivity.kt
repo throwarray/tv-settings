@@ -1,5 +1,7 @@
 package com.tvsettings.app
 
+import androidx.annotation.StringRes
+import kotlinx.coroutines.CoroutineScope
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.snapshots.SnapshotStateMap
@@ -159,6 +161,7 @@ fun TVSettingsScreen() {
     var loading by remember { mutableStateOf(true) }
     var reloadTick by remember { mutableIntStateOf(0) }
     var selectedPackage by remember { mutableStateOf<String?>(null) }
+    var userPicked by remember { mutableStateOf(false) }
     var filter by remember { mutableStateOf(AppFilter.ALL) }
     var sort by remember { mutableStateOf(AppSort.RAM) }
     var sortAscending by remember { mutableStateOf(false) }
@@ -192,7 +195,8 @@ fun TVSettingsScreen() {
                     AppSort.CPU -> compareByDescending<AppRecord> { UsageFeed.snapshot?.perPackage?.get(it.packageName)?.cpuPercent ?: 0f }
                     AppSort.RAM -> compareByDescending<AppRecord> { UsageFeed.snapshot?.perPackage?.get(it.packageName)?.rssKb ?: 0L }
                     else -> sort.comparator
-                }).let { c -> if (sortAscending) c.reversed() else c }
+                    }).thenBy { it.appName.lowercase() }.thenBy { it.packageName }
+                    .let { c -> if (sortAscending) c.reversed() else c }
             )
         }
     }
@@ -203,8 +207,9 @@ fun TVSettingsScreen() {
         val loaded = onIo { AppRegistry(activity).loadInstalledApps() }
         apps.clear()
         apps.addAll(loaded)
-        if (apps.none { it.packageName == selectedPackage }) {
-            selectedPackage = (visibleApps.firstOrNull() ?: apps.firstOrNull())?.packageName
+        if (loaded.none { it.packageName == selectedPackage }) {
+            selectedPackage = null
+            userPicked = false
         }
         loading = false
     }
@@ -224,6 +229,9 @@ fun TVSettingsScreen() {
         }
     }
 
+    LaunchedEffect(loading, visibleApps.firstOrNull()?.packageName) {
+        if (!loading && !userPicked) selectedPackage = visibleApps.firstOrNull()?.packageName
+    }
     val selectedApp = apps.firstOrNull { it.packageName == selectedPackage }
     val showSkeleton = loading && apps.isEmpty()
 
@@ -241,10 +249,10 @@ fun TVSettingsScreen() {
         Row(modifier = Modifier.widthIn(max = Dimens.contentMaxWidth).fillMaxWidth(), verticalAlignment = Alignment.Top) {
             Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
                 Text(
-                    "TV Settings", color = Oled.textPrimary, fontSize = 18.sp, lineHeight = 20.sp,
+                    stringResource(R.string.app_name), color = Oled.textPrimary, fontSize = 18.sp, lineHeight = 20.sp,
                     fontWeight = FontWeight.Bold
                 )
-                Text("App controls", color = Oled.textSecondary, fontSize = 10.sp, lineHeight = 12.sp)
+                Text(stringResource(R.string.app_controls), color = Oled.textSecondary, fontSize = 10.sp, lineHeight = 12.sp)
             }
             Spacer(modifier = Modifier.width(14.dp))
             Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.Top) {
@@ -267,10 +275,10 @@ fun TVSettingsScreen() {
                 }
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Top) {
                     ShizukuStatusButton(shizukuState) { ShizukuManager.requestPermission(activity) }
-                    CompactIconButton(Icons.Default.Settings, "Android settings", Oled.row) {
+                    CompactIconButton(Icons.Default.Settings, stringResource(R.string.android_settings), Oled.row) {
                         AppActionController.openSystemSettings(activity)
                     }
-                    CompactIconButton(Icons.Default.Build, "Advanced settings", Oled.row) {
+                    CompactIconButton(Icons.Default.Build, stringResource(R.string.advanced_settings), Oled.row) {
                         activity.startActivity(Intent(activity, AdvancedSettingsActivity::class.java))
                     }
                 }
@@ -295,23 +303,23 @@ fun TVSettingsScreen() {
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            CompactIconButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back", modifier = Modifier.focusRequester(backFocus).onFocusChanged { backFocused = it.isFocused }) { activity.finish() }
+                            CompactIconButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, stringResource(R.string.back), modifier = Modifier.focusRequester(backFocus).onFocusChanged { backFocused = it.isFocused }) { activity.finish() }
                             CompactSearchField(query, { query = it }, Modifier.weight(1.3f))
                             CompactDropdown(
-                                options = AppFilter.values().map { it.name to it.label },
+                                options = AppFilter.values().map { it.name to activity.getString(it.labelRes) },
                                 selectedId = filter.name,
                                 modifier = Modifier.weight(1f),
                             ) { filter = AppFilter.valueOf(it) }
                             CompactDropdown(
-                                options = AppSort.values().map { it.name to it.label },
+                                options = AppSort.values().map { it.name to activity.getString(it.labelRes) },
                                 selectedId = sort.name,
                                 modifier = Modifier.weight(1f),
                             ) { sort = AppSort.valueOf(it) }
                             CompactIconButton(
                                 if (sortAscending) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
-                                if (sortAscending) "Ascending" else "Descending"
+                                stringResource(if (sortAscending) R.string.ascending else R.string.descending)
                             ) { sortAscending = !sortAscending }
-                            CompactIconButton(Icons.Default.Refresh, "Refresh") {
+                            CompactIconButton(Icons.Default.Refresh, stringResource(R.string.refresh)) {
                                 ShizukuManager.refresh()
                                 reloadTick++
                             }
@@ -319,31 +327,35 @@ fun TVSettingsScreen() {
 
                         Spacer(modifier = Modifier.height(6.dp))
                         Row(
-                            modifier = Modifier.fillMaxWidth().padding(end = 8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(end = 30.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                "Apps (${visibleApps.size})",
+                                stringResource(R.string.apps_count, visibleApps.size),
                                 color = Oled.textSecondary, fontSize = 10.sp, fontWeight = FontWeight.Bold,
                                 modifier = Modifier.weight(1f),
                             )
                             UsageFeed.snapshot?.let { usage ->
                                 Text(
-                                    "CPU ${formatCpu(usage.cpuPercent)}   RAM ${"%.1f / %.1f GB".format(usage.memUsedKb / 1048576.0, usage.memTotalKb / 1048576.0)}",
+                                    stringResource(
+                                        R.string.cpu_ram_usage,
+                                        formatCpu(usage.cpuPercent),
+                                        "%.1f / %.1f GB".format(usage.memUsedKb / 1048576.0, usage.memTotalKb / 1048576.0),
+                                    ),
                                     color = Oled.textSecondary, fontSize = 9.sp,
                                 )
                             }
                         }
                         Spacer(modifier = Modifier.height(3.dp))
-                        if (visibleApps.isEmpty()) EmptyNote("No apps")
+                        if (visibleApps.isEmpty()) EmptyNote(stringResource(R.string.no_apps))
                         val listState = key(filter, sort, sortAscending, query, reloadTick) { rememberLazyListState() }
                         val thumbScope = rememberCoroutineScope()
                         LazyColumn(state = listState, contentPadding = PaddingValues(end = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.fillMaxSize().drawWithContent { drawContent(); drawListThumb(listState) }.thumbDrag(listState, thumbScope)) {
-                            items(visibleApps, key = { it.packageName }) { app ->
+                            items(visibleApps, key = { "$sort|$sortAscending|$filter|$query|${it.packageName}" }) { app ->
                                 AppListRow(
                                     app = app,
                                     selected = app.packageName == selectedPackage,
-                                    onSelect = { selectedPackage = app.packageName }
+                                    onSelect = { selectedPackage = app.packageName; userPicked = true }
                                 )
                             }
                         }
@@ -375,7 +387,7 @@ fun TVSettingsScreen() {
                     modifier = Modifier.weight(1f).fillMaxHeight(),
                     colors = CardDefaults.cardColors(containerColor = Oled.card),
                     shape = RoundedCornerShape(14.dp)
-                ) { EmptyNote("No apps found") }
+                ) { EmptyNote(stringResource(R.string.no_apps_found)) }
             }
         }
     }
@@ -550,14 +562,16 @@ fun AppDetailPane(
             val perms = async(Dispatchers.IO) { AppInspector.loadPermissions(pm, pkg) }
             val ops = async(Dispatchers.IO) { if (shizukuReady) AppInspector.loadAppOps(pm, pkg) else emptyList() }
             val idle = async(Dispatchers.IO) { if (shizukuReady) AppActionController.idleWhitelistEntries() else null }
+            // readable without Shizuku: PowerManager says whether the app is exempt from Doze
+            val exempt = context.getSystemService(android.os.PowerManager::class.java).isIgnoringBatteryOptimizations(pkg)
             val widget = async(Dispatchers.IO) { if (app.isLauncher) AppActionController.widgetBindGranted(context, pkg) else null }
             val loadedOps = ops.await()
             val loadedIdle = idle.await()
+            app.idleWhitelisted = exempt
+            if (loadedIdle != null) {
+                app.idleSystem = loadedIdle[pkg] == true
+            }
             if (shizukuReady) {
-                if (loadedIdle != null) {
-                    app.idleWhitelisted = pkg in loadedIdle
-                    app.idleSystem = loadedIdle[pkg] == true
-                }
                 // ignore = exempt from auto-revoke
                 app.autoRevokePerms = loadedOps.firstOrNull { it.op == AppInspector.AUTO_REVOKE_OP && !it.uidMode }?.mode != "ignore"
                 val notificationMode = loadedOps.firstOrNull { it.op == AppInspector.NOTIFICATIONS_OP && !it.uidMode }?.mode
@@ -622,6 +636,7 @@ fun AppDetailPane(
         var manifestText by remember(app.packageName) { mutableStateOf<String?>(null) }
         var backupPicking by remember(app.packageName) { mutableStateOf(false) }
         val secInfo = paneSections["Info"] ?: false
+        var showNormal by rememberSaveable { mutableStateOf(false) }
         val secActions = paneSections["Actions"] ?: true
         val secPerms = paneSections["Perms"] ?: true
         val secVpn = paneSections["Vpn"] ?: true
@@ -635,14 +650,14 @@ fun AppDetailPane(
         LaunchedEffect(app.packageName, usageTick) { details = onIo { AppDetailsLoader.load(context, app.packageName) } }
         val live = UsageFeed.snapshot?.perPackage?.get(app.packageName)
         val liveText = when {
-            !shizukuReady -> "Needs Shizuku"
-            UsageFeed.snapshot == null -> "..."
-            live == null -> "Not running"
+            !shizukuReady -> context.getString(R.string.needs_shizuku)
+            UsageFeed.snapshot == null -> context.getString(R.string.value_loading)
+            live == null -> context.getString(R.string.not_running)
             else -> "${formatCpu(live.cpuPercent)}  \u00B7  ${formatKb(live.rssKb)}"
         }
         if (backupPicking) {
             FileBrowser(
-                title = "Backup APK to",
+                title = context.getString(R.string.backup_apk_to),
                 start = "/sdcard/Download",
                 dirMode = true,
                 onPick = { dir ->
@@ -655,19 +670,29 @@ fun AppDetailPane(
                 onDismiss = { backupPicking = false },
             )
         }
-        manifestText?.let { text -> TextDialog("Manifest", text) { manifestText = null } }
+        manifestText?.let { text -> TextDialog(context.getString(R.string.manifest), text) { manifestText = null } }
         confirmPending?.let { what ->
             val pkg = app.packageName
             val (title, text, label, command) = when (what) {
                 "data" -> listOf(
-                    "Clear all data?", "$pkg loses its settings, logins and databases. This can't be undone.",
-                    "Clear data", "pm clear $pkg",
+                    context.getString(R.string.clear_all_data_title),
+                    context.getString(R.string.clear_data_confirmation, pkg),
+                    context.getString(R.string.clear_data_action), "pm clear $pkg",
                 )
-                "disable" -> listOf("Disable this app?", "Stops $pkg from running until it is enabled again.", "Disable", "")
-                "enable" -> listOf("Enable this app?", "Turns $pkg back on.", "Enable", "")
+                "disable" -> listOf(
+                    context.getString(R.string.disable_app_title),
+                    context.getString(R.string.disable_app_confirmation, pkg),
+                    context.getString(R.string.disable_app), "",
+                )
+                "enable" -> listOf(
+                    context.getString(R.string.enable_app_title),
+                    context.getString(R.string.enable_app_confirmation, pkg),
+                    context.getString(R.string.enable_app), "",
+                )
                 else -> listOf(
-                    "Uninstall?", "Removes $pkg for this user. For a system app it is only hidden for this user.",
-                    "Uninstall", "pm uninstall --user 0 $pkg",
+                    context.getString(R.string.uninstall_app_title),
+                    context.getString(R.string.uninstall_app_confirmation, pkg),
+                    context.getString(R.string.uninstall_app), "pm uninstall --user 0 $pkg",
                 )
             }
             ConfirmDialog(
@@ -694,14 +719,14 @@ fun AppDetailPane(
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
 
-            item { SectionHeader("Actions", secActions) { paneSections["Actions"] = !secActions } }
+            item { SectionHeader(context.getString(R.string.section_actions), secActions) { paneSections["Actions"] = !secActions } }
             if (secActions) {
             if (hasLaunch) {
-                indentedItem { ActionRow("Launch", Icons.Default.PlayArrow) { AppActionController.launchApp(context, app.packageName) } }
+                indentedItem { ActionRow(context.getString(R.string.launch), Icons.Default.PlayArrow) { AppActionController.launchApp(context, app.packageName) } }
             }
-            indentedItem { ActionRow("App info", Icons.Default.Info) { AppActionController.openAppInfo(context, app.packageName) } }
+            indentedItem { ActionRow(context.getString(R.string.app_info), Icons.Default.Info) { AppActionController.openAppInfo(context, app.packageName) } }
             indentedItem {
-                ActionRow("Force stop *", Icons.Default.Close, enabled = shizukuReady) {
+                ActionRow(context.getString(R.string.force_stop), AppIcons.Stop, enabled = shizukuReady) {
                     scope.launch {
                         if (AppActionController.forceStopApp(context, app.packageName)) {
                             // re-check: the system may restart it
@@ -716,39 +741,44 @@ fun AppDetailPane(
 
             indentedItem {
                 ActionRow(
-                    if (app.isEnabled) "Disable *" else "Enable *",
-                    Icons.Default.Lock,
+                    context.getString(if (app.isEnabled) R.string.disable_app_action else R.string.enable_app_action),
+                    if (app.isEnabled) Icons.Default.Lock else Icons.Default.CheckCircle,
                     enabled = shizukuReady,
-                    subtitle = if (app.isSystem && app.isEnabled) "Disabling a system app can break the device" else null,
+                    subtitle = if (app.isSystem && app.isEnabled) context.getString(R.string.disable_system_app_warning) else null,
                 ) { confirmPending = if (app.isEnabled) "disable" else "enable" }
             }
             indentedItem {
-                ActionRow("Clear data *", AppIcons.Trash, enabled = shizukuReady) { confirmPending = "data" }
+                ActionRow(context.getString(R.string.clear_data_privileged_action), AppIcons.Trash, enabled = shizukuReady) { confirmPending = "data" }
             }
             indentedItem {
-                ActionRow("Uninstall *", AppIcons.Exit, enabled = shizukuReady) { confirmPending = "uninstall" }
+                ActionRow(context.getString(R.string.uninstall_app_action), AppIcons.Exit, enabled = shizukuReady) { confirmPending = "uninstall" }
             }
             indentedItem {
-                ActionRow("Backup APK *", AppIcons.Card, enabled = shizukuReady) { backupPicking = true }
+                ActionRow(context.getString(R.string.backup_apk), AppIcons.Backup, enabled = shizukuReady) { backupPicking = true }
             }
             }
-            item { SectionHeader("Details", secInfo) { paneSections["Info"] = !secInfo } }
+            item { SectionHeader(context.getString(R.string.section_details), secInfo) { paneSections["Info"] = !secInfo } }
             if (secInfo) {
-            indentedItem { StatRow("Version", details?.version ?: "...") }
-            indentedItem { StatRow("Installed", formatDateTime(app.firstInstallTime)) }
-            indentedItem { StatRow("Updated", formatDateTime(app.lastUpdateTime)) }
-            indentedItem { StatRow("Installed by", details?.installer ?: "...") }
+            indentedItem { StatRow(context.getString(R.string.version), details?.version ?: context.getString(R.string.value_loading)) }
+            indentedItem { StatRow(context.getString(R.string.installed), formatDateTime(app.firstInstallTime)) }
+            indentedItem { StatRow(context.getString(R.string.updated), formatDateTime(app.lastUpdateTime)) }
+            indentedItem { StatRow(context.getString(R.string.installed_by), details?.installer ?: context.getString(R.string.value_loading)) }
             details?.let { d ->
                 val appBytes = d.appBytes
                 val dataBytes = d.dataBytes
                 val cacheBytes = d.cacheBytes
                 if (appBytes != null && dataBytes != null && cacheBytes != null) {
-                    indentedItem { StatRow("Total size", formatBytes(context, appBytes + dataBytes + cacheBytes)) }
-                    indentedItem { StatRow("App and data", "${formatBytes(context, appBytes)} and ${formatBytes(context, dataBytes)}") }
-                    indentedItem { StatRow("Cache size", formatBytes(context, cacheBytes)) }
+                    indentedItem { StatRow(context.getString(R.string.total_size), formatBytes(context, appBytes + dataBytes + cacheBytes)) }
+                    indentedItem {
+                        StatRow(
+                            context.getString(R.string.app_and_data),
+                            context.getString(R.string.app_and_data_sizes, formatBytes(context, appBytes), formatBytes(context, dataBytes)),
+                        )
+                    }
+                    indentedItem { StatRow(context.getString(R.string.cache_size), formatBytes(context, cacheBytes)) }
                 } else if (d.needsUsageAccess) {
                     indentedItem {
-                        ActionRow("Allow usage access for sizes *", Icons.Default.Info, enabled = shizukuReady) {
+                        ActionRow(context.getString(R.string.allow_usage_access_for_sizes), Icons.Default.Info, enabled = shizukuReady) {
                             scope.launch {
                                 onIo { Shell.appOpsSet(context.packageName, "GET_USAGE_STATS", "allow") }
                                 usageTick++
@@ -756,52 +786,50 @@ fun AppDetailPane(
                         }
                     }
                 } else {
-                    indentedItem { StatRow("Size", "Not available") }
+                    indentedItem { StatRow(context.getString(R.string.size), context.getString(R.string.not_available)) }
                 }
             }
-            indentedItem { StatRow("CPU and RAM", liveText) }
+            indentedItem { StatRow(context.getString(R.string.cpu_and_ram), liveText) }
             indentedItem {
-                ActionRow("View manifest", AppIcons.Layers) {
+                ActionRow(context.getString(R.string.view_manifest), AppIcons.Layers) {
                     scope.launch { manifestText = onIo { AppManifest.describe(context, app.packageName) } }
                 }
             }
             }
             if (app.isVpn) {
-                item { SectionHeader("VPN", secVpn) { paneSections["Vpn"] = !secVpn } }
+                item { SectionHeader(context.getString(R.string.section_vpn), secVpn) { paneSections["Vpn"] = !secVpn } }
                 if (secVpn) {
-                indentedItem {
-                    ToggleRow(
-                        "Always-on VPN",
-                        app.alwaysOnVpn,
-                        subtitle = "Takes effect after a restart",
-                        enabled = canWrite,
-                    ) { want ->
-                        scope.launch {
-                            val ok = onIo { ServiceSettings.setAlwaysOnVpn(context, app.packageName, want) }
-                            if (!ok) context.toast("Couldn't change always-on VPN")
-                            app.alwaysOnVpn = onIo { ServiceSettings.alwaysOnVpnApp(context) } == app.packageName
-                        }
-                    }
-                }
-                indentedItem {
-                    ToggleRow(
-                        "Block without VPN",
-                        app.vpnLockdown,
-                        subtitle = "Blocks all traffic while the VPN is down; applies after a restart",
-                        enabled = canWrite && app.alwaysOnVpn,
-                    ) { want ->
-                        scope.launch {
-                            val ok = onIo { ServiceSettings.setAlwaysOnVpnLockdown(context, want) }
-                            if (!ok) context.toast("Couldn't change lockdown")
-                            app.vpnLockdown = onIo { ServiceSettings.alwaysOnVpnLockdown(context) }
-                        }
-                    }
-                }
+                indentedToggleItems(
+                    listOf(
+                        ToggleSpec(
+                            "always_on_vpn", R.string.always_on_vpn, app.alwaysOnVpn,
+                            subtitleRes = R.string.always_on_vpn_subtitle,
+                            enabled = canWrite,
+                        ) { want ->
+                            scope.launch {
+                                val ok = onIo { ServiceSettings.setAlwaysOnVpn(context, app.packageName, want) }
+                                if (!ok) context.toast("Couldn't change always-on VPN")
+                                app.alwaysOnVpn = onIo { ServiceSettings.alwaysOnVpnApp(context) } == app.packageName
+                            }
+                        },
+                        ToggleSpec(
+                            "vpn_lockdown", R.string.block_without_vpn, app.vpnLockdown,
+                            subtitleRes = R.string.block_without_vpn_subtitle,
+                            enabled = canWrite && app.alwaysOnVpn,
+                        ) { want ->
+                            scope.launch {
+                                val ok = onIo { ServiceSettings.setAlwaysOnVpnLockdown(context, want) }
+                                if (!ok) context.toast("Couldn't change lockdown")
+                                app.vpnLockdown = onIo { ServiceSettings.alwaysOnVpnLockdown(context) }
+                            }
+                        },
+                    )
+                )
                 }
             }
 
             if (app.accessibilityServices.isNotEmpty()) {
-                item { SectionHeader("Accessibility services", secA11y) { paneSections["A11y"] = !secA11y } }
+                item { SectionHeader(context.getString(R.string.section_accessibility_services), secA11y) { paneSections["A11y"] = !secA11y } }
                 if (secA11y) {
             indentedItems(app.accessibilityServices, key = { "a11y:" + it.component }) { svc ->
                 ToggleRow(svc.label, svc.enabled, subtitle = svc.detail, enabled = canWrite) { want ->
@@ -818,7 +846,7 @@ fun AppDetailPane(
             }
 
             if (app.notificationListeners.isNotEmpty()) {
-                item { SectionHeader("Notification listeners", secNotif) { paneSections["Notif"] = !secNotif } }
+                item { SectionHeader(context.getString(R.string.section_notification_listeners), secNotif) { paneSections["Notif"] = !secNotif } }
                 if (secNotif) {
             indentedItems(app.notificationListeners, key = { "nl:" + it.component }) { svc ->
                 ToggleRow(svc.label, svc.enabled, subtitle = svc.detail, enabled = canWrite) { want ->
@@ -835,13 +863,13 @@ fun AppDetailPane(
             }
 
             if (app.inputMethods.isNotEmpty()) {
-                item { SectionHeader("Keyboard", secKbd) { paneSections["Kbd"] = !secKbd } }
+                item { SectionHeader(context.getString(R.string.section_keyboard), secKbd) { paneSections["Kbd"] = !secKbd } }
                 if (secKbd) {
             indentedItems(app.inputMethods, key = { "ime:" + it.component }) { ime ->
                 ToggleRow(
                     ime.label,
                     ime.enabled,
-                    subtitle = "Set as active keyboard · ${ime.detail}",
+                    subtitle = context.getString(R.string.active_keyboard_subtitle, ime.detail),
                     enabled = canWrite,
                 ) { want ->
                     scope.launch {
@@ -857,13 +885,13 @@ fun AppDetailPane(
             }
 
             if (app.dreams.isNotEmpty()) {
-                item { SectionHeader("Screensaver", secDreams) { paneSections["Dreams"] = !secDreams } }
+                item { SectionHeader(context.getString(R.string.section_screensaver), secDreams) { paneSections["Dreams"] = !secDreams } }
                 if (secDreams) {
                 indentedItems(app.dreams, key = { "dream:" + it.component }) { dream ->
                     ToggleRow(
                         dream.label,
                         dream.enabled,
-                        subtitle = "Use as screensaver · ${dream.detail}",
+                        subtitle = context.getString(R.string.active_screensaver_subtitle, dream.detail),
                         enabled = canWrite,
                     ) { want ->
                         scope.launch {
@@ -877,23 +905,27 @@ fun AppDetailPane(
                 }
                 if (dreamUiAvailable) {
                     // prefer the system screen for timeouts
-                    indentedItem { ActionRow("Screensaver settings", Icons.Default.Settings) { AppActionController.openDreamSettings(context) } }
+                    indentedItem { ActionRow(context.getString(R.string.screensaver_settings), Icons.Default.Settings) { AppActionController.openDreamSettings(context) } }
                 } else {
                     indentedItem {
                         val base = listOf(
-                            60_000L to "1 minute", 300_000L to "5 minutes", 600_000L to "10 minutes",
-                            900_000L to "15 minutes", 1_800_000L to "30 minutes", 3_600_000L to "1 hour",
+                            60_000L to context.getString(R.string.duration_one_minute),
+                            300_000L to context.getString(R.string.duration_five_minutes),
+                            600_000L to context.getString(R.string.duration_ten_minutes),
+                            900_000L to context.getString(R.string.duration_fifteen_minutes),
+                            1_800_000L to context.getString(R.string.duration_thirty_minutes),
+                            3_600_000L to context.getString(R.string.duration_one_hour),
                         )
                         val all = if (screenOffMs > 0 && base.none { it.first == screenOffMs }) {
-                            (base + (screenOffMs to "${screenOffMs / 60_000} min")).sortedBy { it.first }
+                            (base + (screenOffMs to context.getString(R.string.duration_minutes, screenOffMs / 60_000))).sortedBy { it.first }
                         } else {
                             base
                         }
                         DropdownRow(
-                            label = "Screensaver start time",
+                            label = context.getString(R.string.screensaver_start_time),
                             options = all.map { it.first.toString() to it.second },
                             selectedId = screenOffMs.toString(),
-                            subtitle = "System-wide",
+                            subtitle = context.getString(R.string.system_wide_subtitle),
                             enabled = shizukuReady,
                         ) { id ->
                             scope.launch {
@@ -907,41 +939,45 @@ fun AppDetailPane(
                 }
             }
 
-            item { SectionHeader("Permissions *", secPerms) { paneSections["Perms"] = !secPerms } }
+            item { SectionHeader(context.getString(R.string.section_permissions), secPerms) { paneSections["Perms"] = !secPerms } }
             if (secPerms) {
-            indentedItem {
-                ToggleRow(
-                    "Idle Whitelisted",
-                    app.idleWhitelisted,
-                    subtitle = if (app.idleSystem) "On the system whitelist (can't be removed)" else "Exempt from Doze battery optimisation",
-                    enabled = shizukuReady && !app.idleSystem,
-                ) { want ->
-                    scope.launch { app.idleWhitelisted = AppActionController.setIdleWhitelist(context, app.packageName, want) }
-                }
-            }
-            indentedItem {
-                ToggleRow(
-                    "Notifications",
-                    app.notificationsAllowed,
-                    subtitle = "Allow or silence this app's notifications",
-                    enabled = shizukuReady,
-                ) { want ->
-                    scope.launch {
-                        val ok = onIo { AppInspector.setNotifications(app.packageName, want) }
-                        if (ok) {
-                            app.notificationsAllowed = want
-                        } else {
-                            context.toast("Couldn't change notifications")
+                indentedToggleItems(buildList {
+                    add(ToggleSpec(
+                        "show_install_time_permissions",
+                        R.string.show_install_time_permissions,
+                        showNormal,
+                        subtitleRes = R.string.show_install_time_permissions_subtitle,
+                    ) { want -> showNormal = want })
+                    add(ToggleSpec(
+                        "idle_whitelist",
+                        R.string.idle_whitelisted,
+                        app.idleWhitelisted,
+                        subtitleRes = if (app.idleSystem) R.string.idle_whitelisted_system_subtitle else R.string.idle_whitelisted_subtitle,
+                        enabled = shizukuReady && !app.idleSystem,
+                    ) { want ->
+                        scope.launch { app.idleWhitelisted = AppActionController.setIdleWhitelist(context, app.packageName, want) }
+                    })
+                    add(ToggleSpec(
+                        "notifications",
+                        R.string.app_notifications,
+                        app.notificationsAllowed,
+                        subtitleRes = R.string.app_notifications_subtitle,
+                        enabled = shizukuReady,
+                    ) { want ->
+                        scope.launch {
+                            val ok = onIo { AppInspector.setNotifications(app.packageName, want) }
+                            if (ok) {
+                                app.notificationsAllowed = want
+                            } else {
+                                context.toast("Couldn't change notifications")
+                            }
                         }
-                    }
-                }
-            }
-            if (Build.VERSION.SDK_INT >= 30) {
-                indentedItem {
-                    ToggleRow(
-                        "Auto revoke permissions",
+                    })
+                    if (Build.VERSION.SDK_INT >= 30) add(ToggleSpec(
+                        "auto_revoke_permissions",
+                        R.string.auto_revoke_permissions,
                         app.autoRevokePerms,
-                        subtitle = "Remove permissions if the app goes unused",
+                        subtitleRes = R.string.auto_revoke_permissions_subtitle,
                         enabled = shizukuReady,
                     ) { want ->
                         scope.launch {
@@ -952,39 +988,33 @@ fun AppDetailPane(
                                 context.toast("Couldn't change auto revoke")
                             }
                         }
-                    }
-                }
-            }
-            if (app.isLauncher) {
-                indentedItem {
-                    ToggleRow(
-                        label = "Default launcher",
-                        checked = app.defaultLauncher,
-                        enabled = shizukuReady,
-                    ) { want ->
-                        scope.launch {
-                            val change = AppActionController.setDefaultLauncher(context, app.packageName, want)
-                            if (change.success) {
-                                onHomeHolderChanged(change.pinnedPackage)
-                                app.defaultLauncher = change.pinnedPackage == app.packageName
+                    })
+                    if (app.isLauncher) {
+                        add(ToggleSpec("default_launcher", R.string.default_launcher, app.defaultLauncher, enabled = shizukuReady) { want ->
+                            scope.launch {
+                                val change = AppActionController.setDefaultLauncher(context, app.packageName, want)
+                                if (change.success) {
+                                    onHomeHolderChanged(change.pinnedPackage)
+                                    app.defaultLauncher = change.pinnedPackage == app.packageName
+                                }
                             }
-                        }
+                        })
+                        add(ToggleSpec(
+                            "app_bind_widgets",
+                            R.string.app_bind_widgets,
+                            app.appBindWidgets,
+                            subtitleRes = R.string.app_bind_widgets_subtitle,
+                            enabled = shizukuReady,
+                        ) { want ->
+                            scope.launch { app.appBindWidgets = AppActionController.setWidgetBind(context, app.packageName, want) }
+                        })
                     }
-                }
-                indentedItem {
-                    ToggleRow(
-                        "AppBind widgets",
-                        app.appBindWidgets,
-                        subtitle = "Lets this launcher host widgets",
-                        enabled = shizukuReady,
-                    ) { want ->
-                        scope.launch { app.appBindWidgets = AppActionController.setWidgetBind(context, app.packageName, want) }
-                    }
-                }
-            }
+                })
 
-            indentedItems(app.permissions, key = { "perm:" + it.name }) { perm ->
-                ToggleRow(perm.label, perm.granted, subtitle = perm.description, enabled = shizukuReady) { want ->
+            indentedItems(app.permissions.filter { showNormal || it.kind != "fixed" }, key = { "perm:" + it.name }) { perm ->
+                if (perm.kind == "appop") {
+                    AppOpPermRow(app, perm, scope, shizukuReady)
+                } else ToggleRow(perm.label, perm.granted, subtitle = perm.description, enabled = shizukuReady) { want ->
                     scope.launch {
                         val ok = onIo { AppInspector.setPermission(app.packageName, perm.name, want) }
                         if (!ok) {
@@ -1002,7 +1032,7 @@ fun AppDetailPane(
             // auto revoke and notifications have their own toggles
             val shownOps = app.appOps.filter { it.op != AppInspector.AUTO_REVOKE_OP && it.op != AppInspector.NOTIFICATIONS_OP }
             if (shownOps.isNotEmpty()) {
-                item { SectionHeader("AppOps *", secOps) { paneSections["Ops"] = !secOps } }
+                item { SectionHeader(context.getString(R.string.section_appops), secOps) { paneSections["Ops"] = !secOps } }
                 if (secOps) {
             indentedItems(shownOps, key = { "op:" + it.uidMode + ":" + it.op }) { op ->
                 DropdownRow(
@@ -1026,14 +1056,17 @@ fun AppDetailPane(
                 }
             }
             if (allActivities.isNotEmpty()) {
-                item { SectionHeader("Activities", secActs) { paneSections["Acts"] = !secActs } }
+                item { SectionHeader(context.getString(R.string.section_activities), secActs) { paneSections["Acts"] = !secActs } }
                 if (secActs) {
-            indentedItem {
-                ToggleRow("Show unexported", showUnexported, subtitle = "Activities only Shizuku or root can start") { want ->
-                    showUnexported = want
-                    ActivityPrefs.setShowUnexported(context, want)
-                }
-            }
+            indentedToggleItems(listOf(ToggleSpec(
+                "show_unexported_activities",
+                R.string.show_unexported_activities,
+                showUnexported,
+                subtitleRes = R.string.show_unexported_activities_subtitle,
+            ) { want ->
+                showUnexported = want
+                ActivityPrefs.setShowUnexported(context, want)
+            }))
             indentedItems(activities, key = { "act:" + it.className }) { act ->
                 ActivityRow(
                     pkg = app.packageName,
@@ -1100,6 +1133,27 @@ fun ActionRow(label: String, icon: ImageVector, enabled: Boolean = true, subtitl
             Icon(imageVector = icon, contentDescription = null, tint = Oled.textPrimary, modifier = Modifier.size(12.dp))
         }
     }
+}
+
+data class ToggleSpec(
+    val id: String,
+    @StringRes val titleRes: Int,
+    val checked: Boolean,
+    @StringRes val subtitleRes: Int? = null,
+    val subtitle: String? = null,
+    val enabled: Boolean = true,
+    val onToggle: (Boolean) -> Unit,
+)
+
+@Composable
+fun ToggleRow(setting: ToggleSpec) {
+    ToggleRow(
+        label = stringResource(setting.titleRes),
+        checked = setting.checked,
+        subtitle = setting.subtitleRes?.let { stringResource(it) } ?: setting.subtitle,
+        enabled = setting.enabled,
+        onCheckedChange = setting.onToggle,
+    )
 }
 
 @Composable
@@ -1368,7 +1422,7 @@ fun SystemTag() {
             .background(Oled.row, RoundedCornerShape(4.dp))
             .padding(horizontal = 4.dp, vertical = 1.dp)
     ) {
-        Text("System", color = Oled.textSecondary, fontSize = 8.sp)
+        Text(stringResource(R.string.system), color = Oled.textSecondary, fontSize = 8.sp)
     }
 }
 
@@ -1415,7 +1469,7 @@ fun ConfirmDialog(
         title = { Text(title, color = Oled.textPrimary) },
         text = { Text(text, color = Oled.textSecondary) },
         confirmButton = { TextButton(onClick = onConfirm) { Text(confirmLabel, color = Oled.textPrimary) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel", color = Oled.textPrimary) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel), color = Oled.textPrimary) } },
         containerColor = Oled.card,
     )
 }
@@ -1430,7 +1484,49 @@ fun TextDialog(title: String, text: String, onDismiss: () -> Unit) {
                 Text(text, color = Oled.textSecondary, fontSize = 11.sp, lineHeight = 14.sp)
             }
         },
-        confirmButton = { TextButton(onClick = onDismiss) { Text("Close", color = Oled.textPrimary) } },
+        confirmButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.close), color = Oled.textPrimary) } },
         containerColor = Oled.card,
     )
+}
+
+// A permission backed by an AppOp: toggles the op through Shizuku, or opens its Settings page without Shizuku.
+@Composable
+fun AppOpPermRow(app: AppRecord, perm: PermissionEntry, scope: CoroutineScope, shizukuReady: Boolean) {
+    val context = LocalContext.current
+    val op = AppInspector.opForPermission(perm.name)
+    val mode = app.appOps.firstOrNull { it.op == op }?.mode ?: "default"
+    ToggleRow(perm.label, mode == "allow", subtitle = perm.description, enabled = true) { want ->
+        if (shizukuReady) {
+            scope.launch {
+                val ok = onIo { Shell.appOpsSet(app.packageName, op, if (want) "allow" else "ignore").ok }
+                if (!ok) context.toast("Couldn't change ${perm.label}")
+                val fresh = onIo { AppInspector.loadAppOps(context.packageManager, app.packageName) }
+                app.appOps.clear()
+                app.appOps.addAll(fresh)
+            }
+        } else {
+            AppSettingsLinks.open(context, app.packageName, perm.name)
+        }
+    }
+}
+
+// A permission the user can't change: name and description full width, state at the right edge.
+@Composable
+fun FixedPermRow(perm: PermissionEntry) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (focused) Oled.rowFocused else Color.Transparent, RoundedCornerShape(8.dp))
+            .focusable(interactionSource = interaction)
+            .padding(horizontal = 10.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f).padding(end = 8.dp)) {
+            Text(perm.label, color = Oled.textPrimary, fontSize = 12.sp, lineHeight = 14.sp)
+            perm.description?.let { Text(it, color = Oled.textSecondary, fontSize = 10.sp, lineHeight = 12.sp) }
+        }
+        Text(if (perm.granted) "granted" else "not granted", color = Oled.textSecondary, fontSize = 10.sp, maxLines = 1)
+    }
 }

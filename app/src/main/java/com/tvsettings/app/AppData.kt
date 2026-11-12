@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
+import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -14,6 +15,7 @@ data class PermissionEntry(
     val label: String,
     val granted: Boolean,
     val description: String? = null,
+    val kind: String = "runtime",
 )
 
 data class AppOpEntry(
@@ -23,24 +25,24 @@ data class AppOpEntry(
     val uidMode: Boolean = false,
 )
 
-enum class AppFilter(val label: String) {
-    ALL("All"),
-    USER("Installed"),
-    SYSTEM("System"),
+enum class AppFilter(@StringRes val labelRes: Int) {
+    ALL(R.string.filter_all),
+    USER(R.string.filter_installed),
+    SYSTEM(R.string.filter_system),
 }
 
 /** Each key sorts ascending; the UI reverses it. */
-enum class AppSort(val label: String, val comparator: Comparator<AppRecord>) {
-    NAME("Name", compareBy<AppRecord> { it.appName.lowercase() }),
-    PACKAGE("Package", compareBy<AppRecord> { it.packageName }),
-    INSTALLED("Install date", compareBy<AppRecord> { it.firstInstallTime }),
-    UPDATED("Updated", compareBy<AppRecord> { it.lastUpdateTime }),
+enum class AppSort(@StringRes val labelRes: Int, val comparator: Comparator<AppRecord>) {
+    NAME(R.string.sort_name, compareBy<AppRecord> { it.appName.lowercase() }),
+    PACKAGE(R.string.sort_package, compareBy<AppRecord> { it.packageName }),
+    INSTALLED(R.string.sort_install_date, compareBy<AppRecord> { it.firstInstallTime }),
+    UPDATED(R.string.sort_updated, compareBy<AppRecord> { it.lastUpdateTime }),
     // ascending = running first
-    ACTIVE("Active *", compareByDescending<AppRecord> { it.isActive && it.isEnabled }.thenBy { it.appName.lowercase() }),
-    CPU("CPU", compareBy<AppRecord> { 0f }),
-    RAM("RAM", compareBy<AppRecord> { 0L }),
+    ACTIVE(R.string.sort_active, compareByDescending<AppRecord> { it.isActive && it.isEnabled }.thenBy { it.appName.lowercase() }),
+    CPU(R.string.sort_cpu, compareBy<AppRecord> { 0f }),
+    RAM(R.string.sort_ram, compareBy<AppRecord> { 0L }),
     // ascending = frozen (disabled) first
-    FROZEN("Frozen", compareByDescending<AppRecord> { !it.isEnabled }.thenBy { it.appName.lowercase() }),
+    FROZEN(R.string.sort_frozen, compareByDescending<AppRecord> { !it.isEnabled }.thenBy { it.appName.lowercase() }),
 }
 
 class AppRecord(
