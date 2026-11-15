@@ -1,7 +1,7 @@
 package com.tvsettings.app
 
-import android.app.ActivityManager
 import android.content.Context
+import android.app.ActivityManager
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -137,10 +137,11 @@ object ResourceUsage {
         return (100f * (dTotal - (idle - prev.second)) / dTotal).coerceIn(0f, 100f)
     }
 
-    /** Used and total RAM in kb, from the activity manager. */
+    /** Device-wide memory totals, used by the usage widget. */
     fun ram(context: Context): Pair<Long, Long> {
         val info = ActivityManager.MemoryInfo()
         context.getSystemService(ActivityManager::class.java).getMemoryInfo(info)
         return (info.totalMem - info.availMem) / 1024 to info.totalMem / 1024
     }
+
 }

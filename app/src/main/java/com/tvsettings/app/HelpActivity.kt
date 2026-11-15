@@ -3,7 +3,6 @@ package com.tvsettings.app
 import android.net.Uri
 import android.content.Intent
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.foundation.clickable
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -62,26 +61,13 @@ fun HelpScreen(onBack: () -> Unit) {
         ) {
             Column(modifier = Modifier.padding(start = 8.dp)) {
                 Text(
-                    stringResource(R.string.help_title), color = Oled.textPrimary, fontSize = 18.sp,
+                    stringResource(R.string.about_title), color = Oled.textPrimary, fontSize = 18.sp,
                     lineHeight = 20.sp, fontWeight = FontWeight.Bold
                 )
             }
             CompactIconButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back") { onBack() }
         }
         Spacer(modifier = Modifier.height(10.dp))
-        Text(
-            "Source: github.com/throwarray/tv-settings",
-            color = Oled.textPrimary, fontSize = 12.sp,
-            modifier = Modifier
-                .focusable()
-                .clickable {
-                    context.startActivity(
-                        Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/throwarray/tv-settings"))
-                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    )
-                }
-                .padding(horizontal = 4.dp, vertical = 2.dp),
-        )
         Card(
             modifier = Modifier.widthIn(max = Dimens.advancedMaxWidth).fillMaxSize(),
             colors = CardDefaults.cardColors(containerColor = Oled.card),
@@ -90,9 +76,27 @@ fun HelpScreen(onBack: () -> Unit) {
             Column(
                 modifier = Modifier.fillMaxSize().padding(14.dp).verticalScroll(rememberScrollState())
             ) {
-                // focusable so the D-pad can scroll the text
+                    ActionRow(stringResource(R.string.about_repository), AppIcons.ExternalLink) {
+                        context.startActivity(
+                            Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/throwarray/tv-settings"))
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    stringResource(R.string.help_features),
+                    stringResource(R.string.about_summary),
+                    color = Oled.textSecondary, fontSize = 12.sp, lineHeight = 16.sp,
+                    modifier = Modifier.focusable()
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    stringResource(R.string.about_licenses),
+                    color = Oled.textSecondary, fontSize = 12.sp, lineHeight = 16.sp,
+                    modifier = Modifier.focusable()
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    stringResource(R.string.about_active_sort_note) + "\n\n" + stringResource(R.string.about_resource_usage_note),
                     color = Oled.textSecondary, fontSize = 12.sp, lineHeight = 16.sp,
                     modifier = Modifier.focusable()
                 )

@@ -13,7 +13,6 @@ data class FlagSetting(
     val inverted: Boolean = false,
     val also: List<String> = emptyList(),
 ) {
-    val subtitle: String get() = "$key (on = ${if (inverted) 0 else 1})"
     val allKeys: List<String> get() = listOf(key) + also
 
     fun stateOf(raw: String?): Boolean = if (inverted) raw == "0" else raw == "1"

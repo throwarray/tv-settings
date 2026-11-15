@@ -85,21 +85,6 @@ object ElevatedShellManager {
     }
 
     // Starts (or with null, stops) the Home press watcher inside the shell service. Blocking.
-    fun watchHome(callback: IBinder?): Boolean {
-        val bound = binder ?: return false
-        val data = Parcel.obtain()
-        val reply = Parcel.obtain()
-        return try {
-            data.writeStrongBinder(callback)
-            bound.transact(ShellBinder.TRANSACTION_WATCH_HOME, data, reply, 0)
-            reply.readInt() == 1
-        } catch (_: Throwable) {
-            false
-        } finally {
-            data.recycle()
-            reply.recycle()
-        }
-    }
 
     fun runCommand(command: String): String {
         val bound = binder ?: throw IllegalStateException("UserService not bound — call bind() and wait for onConnected first")
@@ -117,12 +102,3 @@ object ElevatedShellManager {
 }
 
 /** Receives Home presses from the log watcher in the shell service. */
-class HomeCallback(private val onPress: (Int) -> Unit) : android.os.Binder() {
-    override fun onTransact(code: Int, data: Parcel, reply: Parcel?, flags: Int): Boolean {
-        if (code == ShellBinder.CALLBACK_PRESS) {
-            onPress(data.readInt())
-            return true
-        }
-        return super.onTransact(code, data, reply, flags)
-    }
-}

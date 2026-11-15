@@ -161,13 +161,18 @@ fun TVSettingsScreen() {
     var loading by remember { mutableStateOf(true) }
     var reloadTick by remember { mutableIntStateOf(0) }
     var selectedPackage by remember { mutableStateOf<String?>(null) }
+    // Once the user engages with the list, nothing moves their selection, focus or scroll on its own.
     var userPicked by remember { mutableStateOf(false) }
+    var settled by remember { mutableStateOf(false) }
+    // The ranking behind the CPU and RAM sorts is frozen, so rows never reorder under the cursor.
+    var rankUsage by remember { mutableStateOf<UsageSnapshot?>(null) }
     var filter by remember { mutableStateOf(AppFilter.ALL) }
     var sort by remember { mutableStateOf(AppSort.RAM) }
     var sortAscending by remember { mutableStateOf(false) }
     var query by remember { mutableStateOf("") }
     val shizukuState by ShizukuManager.state
     val backFocus = remember { FocusRequester() }
+    val appListState = rememberLazyListState()
     var backFocused by remember { mutableStateOf(false) }
 
     // CPU and RAM for the header and the rows, sampled while this screen is in front
@@ -179,7 +184,6 @@ fun TVSettingsScreen() {
             delay(3_000)
         }
     }
-
     val visibleApps by remember {
         derivedStateOf {
             apps.filter {
@@ -192,24 +196,64 @@ fun TVSettingsScreen() {
                 }
             }.sortedWith(
                 (when (sort) {
-                    AppSort.CPU -> compareByDescending<AppRecord> { UsageFeed.snapshot?.perPackage?.get(it.packageName)?.cpuPercent ?: 0f }
-                    AppSort.RAM -> compareByDescending<AppRecord> { UsageFeed.snapshot?.perPackage?.get(it.packageName)?.rssKb ?: 0L }
+                    AppSort.CPU -> compareByDescending<AppRecord> { it.isActive && it.isEnabled }.thenByDescending {
+                        rankUsage?.perPackage?.get(it.packageName)?.cpuPercent?.takeIf(Float::isFinite) ?: 0f
+                    }.thenByDescending {
+                        rankUsage?.perPackage?.get(it.packageName)?.rssKb ?: 0L
+                    }
+                    AppSort.RAM -> compareByDescending<AppRecord> { it.isActive && it.isEnabled }
+                        .thenByDescending { rankUsage?.perPackage?.get(it.packageName)?.rssKb ?: 0L }
+                    AppSort.ACTIVE -> compareByDescending<AppRecord> { it.isActive && it.isEnabled }
                     else -> sort.comparator
                     }).thenBy { it.appName.lowercase() }.thenBy { it.packageName }
                     .let { c -> if (sortAscending) c.reversed() else c }
             )
         }
     }
+    val firstVisiblePackage = visibleApps.firstOrNull()?.packageName
 
+    // The user changed the sort, filter or search, or refreshed: take a fresh ranking, start at the top, select the first app.
+    LaunchedEffect(loading, filter, sort, sortAscending, query, reloadTick) {
+        if (loading) return@LaunchedEffect
+        rankUsage = UsageFeed.snapshot
+        userPicked = false
+        appListState.scrollToItem(0)
+        selectedPackage = firstVisiblePackage
+    }
+
+    // Usage arrives a few seconds after launch. Until the user engages with the list, rank by it once.
+    LaunchedEffect(UsageFeed.snapshot) {
+        val sample = UsageFeed.snapshot ?: return@LaunchedEffect
+        if (!userPicked && sample.perPackage.isNotEmpty() && rankUsage?.perPackage.isNullOrEmpty()) rankUsage = sample
+    }
+
+    // After a re-rank the list keeps the old first row in view by key; go back to the top while it is still untouched.
+    LaunchedEffect(rankUsage) {
+        if (!userPicked && !loading) {
+            appListState.scrollToItem(0)
+            selectedPackage = firstVisiblePackage
+        }
+    }
+
+    // Nothing selected (first load, or the selected app went away): show the first app.
+    LaunchedEffect(loading, firstVisiblePackage, selectedPackage == null) {
+        if (!loading && selectedPackage == null) selectedPackage = firstVisiblePackage
+    }
+
+    // The < button takes the initial focus once the list has settled, so no row gets it and scrolls into view.
+    LaunchedEffect(loading) {
+        if (loading) return@LaunchedEffect
+        delay(500)
+        runCatching { backFocus.requestFocus() }
+        settled = true
+    }
 
     LaunchedEffect(reloadTick) {
-        loading = true
         val loaded = onIo { AppRegistry(activity).loadInstalledApps() }
         apps.clear()
         apps.addAll(loaded)
         if (loaded.none { it.packageName == selectedPackage }) {
             selectedPackage = null
-            userPicked = false
         }
         loading = false
     }
@@ -222,16 +266,15 @@ fun TVSettingsScreen() {
     }
 
     // running apps; other apps' processes are only visible via Shizuku
-    LaunchedEffect(reloadTick, shizukuState, loading) {
+    // Running = the usage sampler's process list (full package names from /proc), plus ps for anything it missed
+    LaunchedEffect(reloadTick, shizukuState, loading, UsageFeed.snapshot) {
         if (!loading && shizukuState == ShizukuManager.State.READY) {
-            val running = onIo { AppActionController.runningPackages() }
+            val running = onIo { AppActionController.runningPackages() } + (UsageFeed.snapshot?.perPackage?.keys ?: emptySet())
             apps.forEach { it.isActive = it.packageName in running }
         }
     }
 
-    LaunchedEffect(loading, visibleApps.firstOrNull()?.packageName) {
-        if (!loading && !userPicked) selectedPackage = visibleApps.firstOrNull()?.packageName
-    }
+    LaunchedEffect(Unit) { Debloat.load(activity) }
     val selectedApp = apps.firstOrNull { it.packageName == selectedPackage }
     val showSkeleton = loading && apps.isEmpty()
 
@@ -348,14 +391,17 @@ fun TVSettingsScreen() {
                         }
                         Spacer(modifier = Modifier.height(3.dp))
                         if (visibleApps.isEmpty()) EmptyNote(stringResource(R.string.no_apps))
-                        val listState = key(filter, sort, sortAscending, query, reloadTick) { rememberLazyListState() }
                         val thumbScope = rememberCoroutineScope()
-                        LazyColumn(state = listState, contentPadding = PaddingValues(end = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.fillMaxSize().drawWithContent { drawContent(); drawListThumb(listState) }.thumbDrag(listState, thumbScope)) {
-                            items(visibleApps, key = { "$sort|$sortAscending|$filter|$query|${it.packageName}" }) { app ->
+                        LazyColumn(state = appListState, contentPadding = PaddingValues(end = 12.dp), verticalArrangement = Arrangement.spacedBy(3.dp), modifier = Modifier.fillMaxSize().drawWithContent { drawContent(); drawListThumb(appListState) }.thumbDrag(appListState, thumbScope)) {
+                            items(visibleApps, key = { it.packageName }) { app ->
                                 AppListRow(
                                     app = app,
                                     selected = app.packageName == selectedPackage,
-                                    onSelect = { selectedPackage = app.packageName; userPicked = true }
+                                    onSelect = {
+                                        selectedPackage = app.packageName
+                                        userPicked = true
+                                    },
+                                    onFocus = { if (settled) userPicked = true },
                                 )
                             }
                         }
@@ -471,9 +517,10 @@ fun AppIcon(packageName: String, size: Dp) {
 // ---------- App list ----------
 
 @Composable
-fun AppListRow(app: AppRecord, selected: Boolean, onSelect: () -> Unit) {
+fun AppListRow(app: AppRecord, selected: Boolean, onSelect: () -> Unit, onFocus: () -> Unit = {}) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
+    LaunchedEffect(focused) { if (focused) onFocus() }
     val shape = RoundedCornerShape(8.dp)
     Row(
         modifier = Modifier
@@ -522,7 +569,8 @@ fun AppListRow(app: AppRecord, selected: Boolean, onSelect: () -> Unit) {
             }
         }
         Box(modifier = Modifier.width(56.dp), contentAlignment = Alignment.CenterEnd) {
-            if (app.isSystem) SystemTag()
+            val tagColor = Debloat.toneColor(Debloat.infoFor(app.packageName)?.tone)
+            if (app.isSystem) SystemTag(tagColor) else UserTag(tagColor)
         }
         Box(modifier = Modifier.width(20.dp), contentAlignment = Alignment.Center) {
             if (app.isActive && app.isEnabled) {
@@ -597,6 +645,7 @@ fun AppDetailPane(
             val vpn = async(Dispatchers.IO) { ServiceSettings.declaresVpnService(context, pkg) }
             val alwaysOn = async(Dispatchers.IO) { ServiceSettings.alwaysOnVpnApp(context) }
             val lockdown = async(Dispatchers.IO) { ServiceSettings.alwaysOnVpnLockdown(context) }
+            val vpnPerm = async(Dispatchers.IO) { ServiceSettings.vpnAllowed(pkg) == true }
             val timeout = async(Dispatchers.IO) { ServiceSettings.screenOffTimeoutMs(context) }
             app.accessibilityServices.clear(); app.accessibilityServices.addAll(a11y.await())
             app.notificationListeners.clear(); app.notificationListeners.addAll(listeners.await())
@@ -605,6 +654,7 @@ fun AppDetailPane(
             app.isVpn = vpn.await()
             app.alwaysOnVpn = alwaysOn.await() == pkg
             app.vpnLockdown = lockdown.await()
+            app.vpnPermission = vpnPerm.await()
             screenOffMs = timeout.await()
         }
         secureLoaded = true
@@ -636,9 +686,9 @@ fun AppDetailPane(
         var manifestText by remember(app.packageName) { mutableStateOf<String?>(null) }
         var backupPicking by remember(app.packageName) { mutableStateOf(false) }
         val secInfo = paneSections["Info"] ?: false
-        var showNormal by rememberSaveable { mutableStateOf(false) }
         val secActions = paneSections["Actions"] ?: true
         val secPerms = paneSections["Perms"] ?: true
+        val secSignaturePerms = paneSections["SignaturePerms"] ?: false
         val secVpn = paneSections["Vpn"] ?: true
         val secA11y = paneSections["A11y"] ?: true
         val secNotif = paneSections["Notif"] ?: true
@@ -759,6 +809,7 @@ fun AppDetailPane(
             }
             item { SectionHeader(context.getString(R.string.section_details), secInfo) { paneSections["Info"] = !secInfo } }
             if (secInfo) {
+            Debloat.infoFor(app.packageName)?.let { info -> indentedItem { DebloatNote(info) } }
             indentedItem { StatRow(context.getString(R.string.version), details?.version ?: context.getString(R.string.value_loading)) }
             indentedItem { StatRow(context.getString(R.string.installed), formatDateTime(app.firstInstallTime)) }
             indentedItem { StatRow(context.getString(R.string.updated), formatDateTime(app.lastUpdateTime)) }
@@ -801,6 +852,17 @@ fun AppDetailPane(
                 if (secVpn) {
                 indentedToggleItems(
                     listOf(
+                        ToggleSpec(
+                            "vpn_permission", R.string.vpn_permission, app.vpnPermission,
+                            subtitleRes = R.string.vpn_permission_subtitle,
+                            enabled = canWrite,
+                        ) { want ->
+                            scope.launch {
+                                val ok = onIo { ServiceSettings.setVpnPermission(app.packageName, want) }
+                                if (!ok) context.toast("Couldn't change the VPN permission")
+                                app.vpnPermission = onIo { ServiceSettings.vpnAllowed(app.packageName) } == true
+                            }
+                        },
                         ToggleSpec(
                             "always_on_vpn", R.string.always_on_vpn, app.alwaysOnVpn,
                             subtitleRes = R.string.always_on_vpn_subtitle,
@@ -943,12 +1005,6 @@ fun AppDetailPane(
             if (secPerms) {
                 indentedToggleItems(buildList {
                     add(ToggleSpec(
-                        "show_install_time_permissions",
-                        R.string.show_install_time_permissions,
-                        showNormal,
-                        subtitleRes = R.string.show_install_time_permissions_subtitle,
-                    ) { want -> showNormal = want })
-                    add(ToggleSpec(
                         "idle_whitelist",
                         R.string.idle_whitelisted,
                         app.idleWhitelisted,
@@ -1011,10 +1067,16 @@ fun AppDetailPane(
                     }
                 })
 
-            indentedItems(app.permissions.filter { showNormal || it.kind != "fixed" }, key = { "perm:" + it.name }) { perm ->
+            indentedItems(app.permissions.filter { it.kind == "runtime" || it.kind == "appop" }, key = { "perm:" + it.name }) { perm ->
                 if (perm.kind == "appop") {
                     AppOpPermRow(app, perm, scope, shizukuReady)
-                } else ToggleRow(perm.label, perm.granted, subtitle = perm.description, enabled = shizukuReady) { want ->
+                } else ToggleRow(
+                    perm.label,
+                    perm.granted,
+                    subtitle = perm.description,
+                    enabled = shizukuReady && (perm.kind == "runtime" || perm.kind == "development"),
+                    focusableWhenDisabled = true,
+                ) { want ->
                     scope.launch {
                         val ok = onIo { AppInspector.setPermission(app.packageName, perm.name, want) }
                         if (!ok) {
@@ -1026,7 +1088,38 @@ fun AppDetailPane(
                     }
                 }
             }
+            val signaturePermissions = app.permissions.filter { it.kind == "signature" }
+            if (signaturePermissions.isNotEmpty()) {
+                indentedItem {
+                    SectionHeader(context.getString(R.string.section_signature_permissions), secSignaturePerms) {
+                        paneSections["SignaturePerms"] = !secSignaturePerms
+                    }
+                }
+                if (secSignaturePerms) indentedItems(signaturePermissions, key = { "signature:" + it.name }) { perm ->
+                    Box(modifier = Modifier.padding(start = 12.dp)) {
+                        ToggleRow(
+                            label = perm.label,
+                            checked = perm.granted,
+                            subtitle = perm.description,
+                            enabled = false,
+                            focusableWhenDisabled = true,
+                        ) { }
+                    }
+                }
+            }
 
+                val secNormalPerms = paneSections["NormalPerms"] ?: false
+                val normalPermissions = app.permissions.filter { it.kind == "fixed" }
+                if (normalPermissions.isNotEmpty()) {
+                    indentedItem {
+                        SectionHeader(context.getString(R.string.section_install_permissions), secNormalPerms) {
+                            paneSections["NormalPerms"] = !secNormalPerms
+                        }
+                    }
+                    if (secNormalPerms) indentedItems(normalPermissions, key = { "normal:" + it.name }) { perm ->
+                        FixedPermRow(perm)
+                    }
+                }
             }
 
             // auto revoke and notifications have their own toggles
@@ -1162,6 +1255,7 @@ fun ToggleRow(
     checked: Boolean,
     subtitle: String? = null,
     enabled: Boolean = true,
+    focusableWhenDisabled: Boolean = false,
     focusDown: FocusRequester? = null,
     onCheckedChange: (Boolean) -> Unit,
 ) {
@@ -1173,6 +1267,7 @@ fun ToggleRow(
             .fillMaxWidth()
             .background(if (focused) Oled.rowFocused else Color.Transparent, shape)
             .then(if (focused) Modifier.border(2.dp, Oled.focusBorder, shape) else Modifier)
+            .then(if (!enabled && focusableWhenDisabled) Modifier.focusable(interactionSource = interaction) else Modifier)
             .keyDownClick(enabled) { onCheckedChange(!checked) }
             .then(if (focusDown != null) Modifier.focusProperties { down = focusDown } else Modifier)
             .toggleable(
@@ -1416,13 +1511,24 @@ fun CompactTextButton(label: String, description: String, onClick: () -> Unit) {
 }
 
 @Composable
-fun SystemTag() {
+fun UserTag(color: Color) {
     Box(
         modifier = Modifier
-            .background(Oled.row, RoundedCornerShape(4.dp))
+            .background(color.copy(alpha = 0.22f), RoundedCornerShape(4.dp))
             .padding(horizontal = 4.dp, vertical = 1.dp)
     ) {
-        Text(stringResource(R.string.system), color = Oled.textSecondary, fontSize = 8.sp)
+        Text(stringResource(R.string.user), color = color, fontWeight = FontWeight.Medium, fontSize = 8.sp)
+    }
+}
+
+@Composable
+fun SystemTag(color: Color) {
+    Box(
+        modifier = Modifier
+            .background(color.copy(alpha = 0.22f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 4.dp, vertical = 1.dp)
+    ) {
+        Text(stringResource(R.string.system), color = color, fontWeight = FontWeight.Medium, fontSize = 8.sp)
     }
 }
 
@@ -1494,8 +1600,19 @@ fun TextDialog(title: String, text: String, onDismiss: () -> Unit) {
 fun AppOpPermRow(app: AppRecord, perm: PermissionEntry, scope: CoroutineScope, shizukuReady: Boolean) {
     val context = LocalContext.current
     val op = AppInspector.opForPermission(perm.name)
-    val mode = app.appOps.firstOrNull { it.op == op }?.mode ?: "default"
-    ToggleRow(perm.label, mode == "allow", subtitle = perm.description, enabled = true) { want ->
+    val mode = if (shizukuReady) {
+        app.appOps.firstOrNull { it.op == op }?.mode ?: "default"
+    } else {
+        AppInspector.appOpMode(context, app.packageName, perm.name)
+            ?: app.appOps.firstOrNull { it.op == op }?.mode
+            ?: "default"
+    }
+    val granted = when (mode) {
+        "allow" -> true
+        "ignore", "deny" -> false
+        else -> perm.granted
+    }
+    ToggleRow(perm.label, granted, subtitle = perm.description, enabled = true) { want ->
         if (shizukuReady) {
             scope.launch {
                 val ok = onIo { Shell.appOpsSet(app.packageName, op, if (want) "allow" else "ignore").ok }
@@ -1528,5 +1645,22 @@ fun FixedPermRow(perm: PermissionEntry) {
             perm.description?.let { Text(it, color = Oled.textSecondary, fontSize = 10.sp, lineHeight = 12.sp) }
         }
         Text(if (perm.granted) "granted" else "not granted", color = Oled.textSecondary, fontSize = 10.sp, maxLines = 1)
+    }
+}
+
+@Composable
+fun DebloatNote(info: Debloat.Info) {
+    val label = stringResource(
+        when (info.tone) {
+            Debloat.Tone.RECOMMENDED -> R.string.tone_recommended
+            Debloat.Tone.KEEP -> R.string.tone_keep
+            Debloat.Tone.PROTECTED -> R.string.tone_protected
+            Debloat.Tone.ADVANCED -> R.string.tone_advanced
+            Debloat.Tone.UNSAFE -> R.string.tone_unsafe
+        }
+    )
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp)) {
+        Text(label, color = Debloat.toneColor(info.tone), fontSize = 12.sp, lineHeight = 14.sp)
+        info.note?.let { Text(it, color = Oled.textSecondary, fontSize = 10.sp, lineHeight = 12.sp) }
     }
 }

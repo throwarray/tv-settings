@@ -1,5 +1,7 @@
 package com.tvsettings.app
 
+import android.app.AppOpsManager
+import android.content.Context
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.content.pm.PermissionInfo
@@ -68,12 +70,16 @@ object AppInspector {
         return states
     }
 
-    private fun protLabel(pi: PermissionInfo): String = when (pi.protection) {
-        PermissionInfo.PROTECTION_DANGEROUS -> "dangerous"
-        PermissionInfo.PROTECTION_SIGNATURE -> "signature"
-        PermissionInfo.PROTECTION_NORMAL -> "normal"
-        else -> "other"
-    }
+    private fun protLabel(pi: PermissionInfo, development: Boolean): String = buildList {
+        add(when (pi.protection) {
+            PermissionInfo.PROTECTION_DANGEROUS -> "dangerous"
+            PermissionInfo.PROTECTION_SIGNATURE -> "signature"
+            PermissionInfo.PROTECTION_NORMAL -> "normal"
+            else -> "other"
+        })
+        if (development) add("development")
+        if (pi.protectionFlags and PermissionInfo.PROTECTION_FLAG_PRIVILEGED != 0) add("privileged")
+    }.joinToString("/")
 
     fun loadPermissions(pm: PackageManager, pkg: String): List<PermissionEntry> {
         val info = try {
@@ -103,12 +109,13 @@ object AppInspector {
             } catch (_: Exception) {
                 null
             }
-            val tag = if (runtime) "" else "[${protLabel(pi)}] "
+            val tag = if (runtime) "" else "[${protLabel(pi, development)}] "
             val kind = when {
                 name == "android.permission.ACCESS_MOCK_LOCATION" -> "appop"
                 runtime -> "runtime"
                 (pi.protectionFlags and PermissionInfo.PROTECTION_FLAG_APPOP) != 0 -> "appop"
                 pi.protection == PermissionInfo.PROTECTION_NORMAL -> "fixed"
+                development -> "development"
                 else -> "signature"
             }
             PermissionEntry(name, pretty(name.substringAfterLast('.')), granted, (tag + (description ?: "")).takeIf { it.isNotBlank() }, kind)
@@ -141,8 +148,15 @@ object AppInspector {
 
     /** Hide gated ops unless the permission is requested or the op was explicitly restricted. */
     // every op is listed; its permission, when requested, is the one that matters
+    // Ops that matter with no permission behind them: background execution and boot.
+    private val ALWAYS_SHOWN = setOf(
+        AUTO_REVOKE_OP, NOTIFICATIONS_OP,
+        "RUN_IN_BACKGROUND", "RUN_ANY_IN_BACKGROUND", "START_FOREGROUND", "WAKE_LOCK",
+        "BOOT_COMPLETED", "ACCESS_NOTIFICATIONS", "WRITE_SETTINGS",
+    )
+
     private fun isRelevant(entry: AppOpEntry, requested: Set<String>): Boolean {
-        if (entry.op == AUTO_REVOKE_OP || entry.op == NOTIFICATIONS_OP) return true
+        if (entry.op in ALWAYS_SHOWN) return true
         val permission = OP_PERMISSION[entry.op] ?: entry.op
         return "android.permission.$permission" in requested
     }
@@ -159,6 +173,8 @@ object AppInspector {
             val key = (if (uidMode) "uid:" else "pkg:") + op
             if (key !in found) found[key] = entry(op, m.groupValues[3], uidMode)
         }
+        // Ops listed by appops get are explicitly set (by the user or the system): always shown, requested or not.
+        val explicit = found.keys.toSet()
         CURATED.forEach { (op, minSdk) ->
             if (Build.VERSION.SDK_INT >= minSdk && found.keys.none { it.endsWith(":$op") }) {
                 found["pkg:$op"] = entry(op, "default", false)
@@ -172,7 +188,10 @@ object AppInspector {
             null
         }
         return found.values
-            .filter { requested == null || isRelevant(it, requested) }
+            .filter {
+                requested == null || isRelevant(it, requested) ||
+                    "pkg:${it.op}" in explicit || "uid:${it.op}" in explicit
+            }
             .sortedBy { it.label }
     }
 
@@ -183,6 +202,23 @@ object AppInspector {
     fun opForPermission(permission: String): String {
         val short = permission.substringAfterLast('.')
         return OP_PERMISSION.entries.firstOrNull { it.value == short }?.key ?: short
+    }
+
+    fun appOpMode(context: Context, pkg: String, permission: String): String? = try {
+        val op = AppOpsManager.permissionToOp(permission) ?: return null
+        val uid = context.packageManager.getApplicationInfo(pkg, 0).uid
+        @Suppress("DEPRECATION")
+        val mode = context.getSystemService(AppOpsManager::class.java).checkOpNoThrow(op, uid, pkg)
+        when (mode) {
+            AppOpsManager.MODE_ALLOWED -> "allow"
+            AppOpsManager.MODE_IGNORED -> "ignore"
+            AppOpsManager.MODE_ERRORED -> "deny"
+            AppOpsManager.MODE_DEFAULT -> "default"
+            AppOpsManager.MODE_FOREGROUND -> "foreground"
+            else -> null
+        }
+    } catch (_: Exception) {
+        null
     }
 
     fun setAppOp(pkg: String, entry: AppOpEntry, mode: String): Boolean {

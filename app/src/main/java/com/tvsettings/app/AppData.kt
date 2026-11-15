@@ -43,6 +43,7 @@ enum class AppSort(@StringRes val labelRes: Int, val comparator: Comparator<AppR
     RAM(R.string.sort_ram, compareBy<AppRecord> { 0L }),
     // ascending = frozen (disabled) first
     FROZEN(R.string.sort_frozen, compareByDescending<AppRecord> { !it.isEnabled }.thenBy { it.appName.lowercase() }),
+    DEBLOAT(R.string.sort_debloat, compareBy<AppRecord> { Debloat.rank(Debloat.infoFor(it.packageName)?.tone) }),
 }
 
 class AppRecord(
@@ -64,6 +65,7 @@ class AppRecord(
     var isVpn by mutableStateOf(false)
     var alwaysOnVpn by mutableStateOf(false)
     var vpnLockdown by mutableStateOf(false)
+    var vpnPermission by mutableStateOf(false)
     var defaultLauncher by mutableStateOf(isDefaultLauncher)
     var appBindWidgets by mutableStateOf(false)
     val accessibilityServices = mutableStateListOf<ServiceEntry>()

@@ -31,7 +31,6 @@ import java.util.concurrent.Executors
 
 object OverlayPrefs {
     const val PREFS = "tvsettings"
-    private const val MOUSE = "mouse_enabled"
     private const val DOT = "vpn_dot_enabled"
     private const val BACKEND = "mouse_backend"
     private const val ENFORCER = "enforcer_enabled"
@@ -40,15 +39,10 @@ object OverlayPrefs {
     private const val HOME_LAUNCH = "home_redirect_launch"
     private const val HOME_BOOT = "home_on_boot"
     private const val DEFAULT_INTERCEPT = "com.amazon.tv.launcher/com.amazon.tv.launcher.ui.HomeActivity_vNext"
-    private const val SPEED = "mouse_speed"
-    private const val MOUSE_COLOR = "mouse_color"
-    private const val SCROLL_SPEED = "scroll_speed"
     private const val HOME_DELAY = "home_delay_ms"
-    private const val BLACK_ACTIVITY = "black_activity"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    fun mouseEnabled(context: Context): Boolean = prefs(context).getBoolean(MOUSE, false)
     fun dotEnabled(context: Context): Boolean = prefs(context).getBoolean(DOT, false)
 
     // auto | adb | accessibility
@@ -58,30 +52,13 @@ object OverlayPrefs {
         prefs(context).edit().putString(BACKEND, backend).apply()
     }
 
-    fun speed(context: Context): String = prefs(context).getString(SPEED, null) ?: "medium"
 
-    fun setSpeed(context: Context, speed: String) {
-        prefs(context).edit().putString(SPEED, speed).apply()
-    }
 
     // slow | normal | fast: how far a scroll key drags, in pixels
-    fun scrollSpeedName(context: Context): String = prefs(context).getString(SCROLL_SPEED, null) ?: "normal"
 
-    fun setScrollSpeed(context: Context, name: String) {
-        prefs(context).edit().putString(SCROLL_SPEED, name).apply()
-    }
 
-    fun scrollDistance(context: Context): Int = when (scrollSpeedName(context)) {
-        "slow" -> 160
-        "fast" -> 560
-        else -> 320
-    }
 
-    fun blackActivity(context: Context): Boolean = prefs(context).getBoolean(BLACK_ACTIVITY, false)
 
-    fun setBlackActivity(context: Context, on: Boolean) {
-        prefs(context).edit().putBoolean(BLACK_ACTIVITY, on).apply()
-    }
 
     // black-screen time between the intercepted home appearing and the redirect
     fun homeDelayMs(context: Context): Int = prefs(context).getInt(HOME_DELAY, 1000)
@@ -91,35 +68,17 @@ object OverlayPrefs {
     }
 
     // white | yellow | cyan | green | red | magenta
-    fun cursorColorName(context: Context): String = prefs(context).getString(MOUSE_COLOR, null) ?: "white"
 
-    fun setCursorColor(context: Context, name: String) {
-        prefs(context).edit().putString(MOUSE_COLOR, name).apply()
-    }
 
-    fun cursorColor(context: Context): Int = when (cursorColorName(context)) {
-        "yellow" -> Color.YELLOW
-        "cyan" -> Color.CYAN
-        "green" -> Color.GREEN
-        "red" -> Color.RED
-        "magenta" -> Color.MAGENTA
-        else -> Color.WHITE
-    }
 
-    fun speedFactor(context: Context): Float = when (speed(context)) {
-        "slow" -> 0.4f
-        "fast" -> 1f
-        "faster" -> 1.4f
-        else -> 0.65f
-    }
 
-    fun setMouse(context: Context, enabled: Boolean): Boolean = set(context, MOUSE, enabled)
 
     fun setDot(context: Context, enabled: Boolean): Boolean = set(context, DOT, enabled)
 
-    fun enforcerEnabled(context: Context): Boolean = prefs(context).getBoolean(ENFORCER, true)
+    fun enforcerEnabled(context: Context): Boolean = prefs(context).getBoolean(ENFORCER, false)
 
-    fun homeRedirectEnabled(context: Context): Boolean = prefs(context).getBoolean(HOME_REDIRECT, false)
+    // Fallback for when the remap engine is down: on by default
+    fun homeRedirectEnabled(context: Context): Boolean = prefs(context).getBoolean(HOME_REDIRECT, true)
 
     // flattened component of the home activity to intercept (Amazon's by default)
     fun homeRedirectTarget(context: Context): String = prefs(context).getString(HOME_TARGET, null) ?: DEFAULT_INTERCEPT
@@ -135,7 +94,7 @@ object OverlayPrefs {
     }
 
     // the accessibility service is needed by the mouse, the dot and the home redirect
-    fun wantsService(context: Context): Boolean = mouseEnabled(context) || dotEnabled(context) || homeRedirectEnabled(context)
+    fun wantsService(context: Context): Boolean = dotEnabled(context) || homeRedirectEnabled(context)
 
     fun setHomeRedirect(context: Context, enabled: Boolean, intercept: String, launch: String): Boolean {
         prefs(context).edit()
@@ -173,23 +132,8 @@ object OverlayPrefs {
 class OverlayService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private val io = Executors.newSingleThreadExecutor()
-    private var holding = false
-    private val moveInFlight = java.util.concurrent.atomic.AtomicBoolean(false)
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> onPrefsChanged() }
 
-    private var cursor: View? = null
-    private var cursorParams: WindowManager.LayoutParams? = null
-    private var cursorHalf = 0
-    private var active = false
-    private var x = 0
-    private var y = 0
-    private var maxX = 0
-    private var maxY = 0
-    private var lastPlay = 0L
-    private var swallowPlayUp = false
-    private val held = mutableSetOf<Int>()
-    private var heldSince = 0L
-    private var ticking = false
 
     private var dot: View? = null
     private var dotParams: WindowManager.LayoutParams? = null
@@ -228,18 +172,6 @@ class OverlayService : AccessibilityService() {
         }
     }
 
-    private val moveTick = object : Runnable {
-        override fun run() {
-            val heldMs = SystemClock.uptimeMillis() - heldSince
-            if (!active || held.isEmpty() || heldMs > MAX_HOLD_MS) { // the cap guards against a lost key-up
-                held.clear()
-                ticking = false
-                return
-            }
-            moveBy(scaled((BASE_STEP + heldMs / RAMP_MS_PER_PX).coerceAtMost(MAX_STEP.toLong()).toInt()))
-            handler.postDelayed(this, TICK_MS)
-        }
-    }
 
     // Home redirect. A Home press on the stock home starts a pending redirect: black screen, then the launch app after
     // the delay. A press or a navigation during the delay keeps stock. A press on the custom launcher lets stock show.
@@ -256,11 +188,7 @@ class OverlayService : AccessibilityService() {
     private var ignoreUntil = 0L
     private var curPkg: String? = null
     private var broadcastOn = false
-    private var watcherOn = false
-    @Volatile private var localOn = false
-    private var localProcess: Process? = null
 
-    private val homeCallback = HomeCallback { kind -> handler.post { onPress(kind) } }
 
     private val homeReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
@@ -325,6 +253,13 @@ class OverlayService : AccessibilityService() {
     }
 
     // Key path: every Home press reaches here first.
+    override fun onKeyEvent(event: KeyEvent): Boolean {
+        // the engine grabs the remote while it runs: these keys never reach here
+        if (RemapEngine.active(this)) return false
+        if (event.keyCode == KeyEvent.KEYCODE_HOME && OverlayPrefs.homeRedirectEnabled(this)) onHomeKey(event)
+        return false
+    }
+
     private fun onHomeKey(event: KeyEvent) {
         if (event.action == KeyEvent.ACTION_UP) {
             homeHeld = false
@@ -360,7 +295,7 @@ class OverlayService : AccessibilityService() {
         val now = SystemClock.uptimeMillis()
         if (now - lastKeyPressAt < 1000 || now - lastPressMs < 400) return
         lastPressMs = now
-        if (!OverlayPrefs.homeRedirectEnabled(this) || kind == 2) return
+        if (!OverlayPrefs.homeRedirectEnabled(this) || kind == 2 || RemapEngine.active(this)) return
         android.util.Log.d("HomeRedirect", "press from a non-key source, curPkg=$curPkg")
         if (pendingActive()) {
             stayOnStock("second press (source)")
@@ -369,75 +304,20 @@ class OverlayService : AccessibilityService() {
         if (curPkg != null && curPkg == stockPkg()) startPending()
     }
 
-    // Press sources for the log: READ_LOGS read in-process when granted, else the Shizuku shell's log.
-    private fun syncHomeWatcher() {
-        val enabled = OverlayPrefs.homeRedirectEnabled(this)
-        val logs = checkSelfPermission("android.permission.READ_LOGS") == PackageManager.PERMISSION_GRANTED
-        if (enabled && logs) startLocalWatcher() else stopLocalWatcher()
-        val wantShell = enabled && !logs && ShizukuManager.isReady && ElevatedShellManager.isBound
-        if (!wantShell) {
-            if (watcherOn) {
-                watcherOn = false
-                io.execute { ElevatedShellManager.watchHome(null) }
-            }
-            return
-        }
-        if (!watcherOn) {
-            watcherOn = true
-            io.execute {
-                val ok = ElevatedShellManager.watchHome(homeCallback)
-                handler.post { watcherOn = ok }
-            }
-        }
-    }
 
-    private fun startLocalWatcher() {
-        if (localOn) return
-        localOn = true
-        Thread {
-            var process: Process? = null
-            try {
-                process = ProcessBuilder("/system/bin/logcat", "-v", "brief", "-T", "1", "-s", "FireTVKeyPolicyManager:V")
-                    .redirectErrorStream(true)
-                    .start()
-                localProcess = process
-                val started = SystemClock.uptimeMillis()
-                val reader = process.inputStream.bufferedReader()
-                while (localOn) {
-                    val line = reader.readLine() ?: break
-                    // the first lines are the log's backlog, not presses
-                    if (SystemClock.uptimeMillis() - started < 1_500) continue
-                    val kind = when {
-                        line.contains("LongPressOnHome") -> 2
-                        line.contains("ShortPressOnHome") -> 1
-                        else -> 0
-                    }
-                    if (kind != 0) handler.post { onPress(kind) }
-                }
-            } catch (_: Throwable) {
-            } finally {
-                val finished = process
-                finished?.destroy()
-                handler.post {
-                    if (localProcess === finished) {
-                        localProcess = null
-                        localOn = false
-                    }
-                }
-            }
-        }.apply { isDaemon = true }.start()
-    }
 
-    private fun stopLocalWatcher() {
-        localOn = false
-        localProcess?.destroy()
-        localProcess = null
-    }
+    private var nextEnsure = 0L
 
+    // The engine comes back after a reboot, a crash or Shizuku starting late: check every 30 s
     private val watcherTick: Runnable = Runnable {
-        syncHomeWatcher()
+        if (SystemClock.uptimeMillis() >= nextEnsure) {
+            nextEnsure = SystemClock.uptimeMillis() + 30_000
+            val launch = OverlayPrefs.homeLaunchTarget(this)
+            if (RemapEngine.enabled(this) && ShizukuManager.isReady) io.execute { RemapEngine.ensure(this, launch) }
+        }
         handler.postDelayed(watcherTick, WATCHER_MS)
     }
+
 
     // Boot: the same pending redirect as a Home press.
     fun requestBootRedirect() = startPending()
@@ -451,8 +331,8 @@ class OverlayService : AccessibilityService() {
         val now = SystemClock.uptimeMillis()
         val launch = launchPkg()
         // the launch app showing up means the redirect worked: drop the black screen
-        if (blackout != null && pkg != null && pkg == launch && now < cooldownUntil) handler.postDelayed(hideBlackout, 250)
-        if (!OverlayPrefs.homeRedirectEnabled(this)) return
+        if (pkg != null && pkg == launch && now < cooldownUntil) handler.postDelayed(hideBlackout, 250)
+        if (!OverlayPrefs.homeRedirectEnabled(this) || RemapEngine.active(this)) return
         val target = ComponentName.unflattenFromString(OverlayPrefs.homeRedirectTarget(this)) ?: return
         // exact package and class only, so the stock home's own screens never match
         if (pkg != target.packageName || cls != target.className) {
@@ -491,276 +371,48 @@ class OverlayService : AccessibilityService() {
 
     private fun onPrefsChanged() {
         if (OverlayPrefs.dotEnabled(this)) showDot() else hideDot()
-        if (!OverlayPrefs.mouseEnabled(this)) setActive(false)
-        syncHomeWatcher()
     }
 
     private fun windowManager(): WindowManager = getSystemService(WindowManager::class.java)
 
     // ---------------------------------------------------------------- mouse
 
-    override fun onKeyEvent(event: KeyEvent): Boolean {
-        if (event.keyCode == KeyEvent.KEYCODE_HOME) {
-            if (OverlayPrefs.homeRedirectEnabled(this)) onHomeKey(event)
-            return false
-        }
-        if (OverlayPrefs.mouseEnabled(this) && (event.keyCode == KeyEvent.KEYCODE_MENU || event.keyCode == KeyEvent.KEYCODE_MEDIA_NEXT)) {
-            // scroll keys replace their default actions while the mouse is on
-            if (event.action == KeyEvent.ACTION_DOWN) scrollAt(if (event.keyCode == KeyEvent.KEYCODE_MENU) -1 else 1)
-            return true
-        }
-        if (!OverlayPrefs.mouseEnabled(this)) return false
-        val down = event.action == KeyEvent.ACTION_DOWN
-        when (event.keyCode) {
-            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> {
-                if (!down) return swallowPlayUp.also { swallowPlayUp = false }
-                if (event.repeatCount == 0) {
-                    val now = SystemClock.uptimeMillis()
-                    if (now - lastPlay < DOUBLE_PRESS_MS) {
-                        // the first press already reached the app; only the second is swallowed
-                        lastPlay = 0
-                        swallowPlayUp = true
-                        setActive(!active)
-                        return true
-                    }
-                    lastPlay = now
-                }
-                return false
-            }
-        }
-        if (!active) return false
-        return when (event.keyCode) {
-            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                direction(event.keyCode, down)
-                true
-            }
-            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
-                if (event.repeatCount == 0) {
-                    if (down) pressDown() else pressUp()
-                }
-                true
-            }
-            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
-                if (down && event.repeatCount == 0) scroll(-1)
-                true
-            }
-            KeyEvent.KEYCODE_MEDIA_REWIND -> {
-                if (down && event.repeatCount == 0) scroll(1)
-                true
-            }
-            KeyEvent.KEYCODE_BACK -> {
-                if (!down) setActive(false)
-                true
-            }
-            else -> false
-        }
-    }
 
     // Movement is driven by our own timer while a key is held, not by key-repeat events.
-    private fun direction(code: Int, down: Boolean) {
-        if (!down) {
-            held.remove(code)
-            return
-        }
-        if (code in held) return
-        held.add(code)
-        moveBy(scaled(BASE_STEP)) // so a quick tap still moves
-        if (!ticking) {
-            ticking = true
-            heldSince = SystemClock.uptimeMillis()
-            handler.postDelayed(moveTick, TICK_MS)
-        }
-    }
 
-    private fun scaled(step: Int) = (step * OverlayPrefs.speedFactor(this)).toInt().coerceAtLeast(1)
 
-    private fun moveBy(step: Int) {
-        var dx = 0
-        var dy = 0
-        if (KeyEvent.KEYCODE_DPAD_LEFT in held) dx -= step
-        if (KeyEvent.KEYCODE_DPAD_RIGHT in held) dx += step
-        if (KeyEvent.KEYCODE_DPAD_UP in held) dy -= step
-        if (KeyEvent.KEYCODE_DPAD_DOWN in held) dy += step
-        if (dx == 0 && dy == 0) return
-        x = (x + dx).coerceIn(0, maxX)
-        y = (y + dy).coerceIn(0, maxY)
-        val layout = cursorParams
-        val view = cursor
-        if (layout != null && view != null) {
-            layout.x = x - cursorHalf
-            layout.y = y - cursorHalf
-            windowManager().updateViewLayout(view, layout)
-        }
-        if (holding) sendMove()
-    }
 
-    private fun setActive(on: Boolean) {
-        if (on == active) return
-        active = on
-        held.clear()
-        if (!on) pressUp()
-        if (on) showCursor() else hideCursor()
-        toast(getString(if (active) R.string.mouse_on else R.string.mouse_off))
-    }
 
     // Redraws a visible cursor so a colour change shows at once
-    fun refreshCursor() {
-        if (cursor != null) {
-            hideCursor()
-            showCursor()
-        }
-    }
 
-    private fun showCursor() {
-        val metrics = DisplayMetrics()
-        @Suppress("DEPRECATION")
-        windowManager().defaultDisplay.getRealMetrics(metrics)
-        maxX = metrics.widthPixels - 1
-        maxY = metrics.heightPixels - 1
-        if (x == 0 && y == 0) {
-            x = maxX / 2
-            y = maxY / 2
-        }
-        val size = (16 * metrics.density).toInt()
-        cursorHalf = size / 2
-        val tint = OverlayPrefs.cursorColor(this)
-        val view = View(this).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(tint)
-                setStroke((2 * metrics.density).toInt(), Color.BLACK)
-            }
-        }
-        val layout = overlayParams(size)
-        layout.gravity = Gravity.TOP or Gravity.START
-        layout.x = x - cursorHalf
-        layout.y = y - cursorHalf
-        try {
-            windowManager().addView(view, layout)
-            cursor = view
-            cursorParams = layout
-        } catch (_: Exception) {
-            active = false
-        }
-    }
 
-    private fun hideCursor() {
-        cursor?.let {
-            try {
-                windowManager().removeView(it)
-            } catch (_: Exception) {
-            }
-        }
-        cursor = null
-        cursorParams = null
-    }
 
     // Shizuku when it's connected, otherwise an accessibility gesture
-    private fun press(viaShell: () -> ShellResult, viaGesture: () -> Unit) {
-        if (!ShizukuManager.isReady) {
-            viaGesture()
-            return
-        }
-        io.execute { if (!viaShell().ok) handler.post { viaGesture() } }
-    }
 
-    private fun tap(px: Int, py: Int) =
-        press({ Shell.tap(px, py) }) { gesture(Path().apply { moveTo(px.toFloat(), py.toFloat()) }, 50) }
 
     // With Shizuku, OK sends a real DOWN and UP, so holding OK holds the press while the cursor moves.
     // Without Shizuku a press is only a tap.
     // Swipe through the cursor point: +1 scrolls down (finger moves up), -1 scrolls up. Needs Shizuku.
-    private fun scrollAt(direction: Int) {
-        val half = OverlayPrefs.scrollDistance(this) / 2
-        val fromY = (y + direction * half).coerceAtLeast(0)
-        val toY = (y - direction * half).coerceAtLeast(0)
-        val px = x
-        io.execute {
-            if (!Shell.scrollSwipe(px, fromY, px, toY).ok) handler.post { toast("Scroll failed: Shizuku isn't running") }
-        }
-    }
+
+    // remapd's pointer lines, forwarded by the key injector: "P on", "P off", "P dx dy wheel button".
+
+
 
     // Full-screen black while the redirect is pending, so the stock launcher never shows.
-    private var blackout: View? = null
 
     private val hideBlackout = Runnable {
-        blackout?.let { runCatching { windowManager().removeView(it) } }
-        blackout = null
         BlackActivity.dismiss()
     }
 
-    private fun showBlackout() {
-        if (OverlayPrefs.blackActivity(this)) {
-            BlackActivity.show(this)
-        } else if (blackout == null) {
-            val view = View(this).apply { setBackgroundColor(Color.BLACK) }
-            val params = android.view.WindowManager.LayoutParams(
-                android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                android.view.WindowManager.LayoutParams.MATCH_PARENT,
-                android.view.WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                android.view.WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    android.view.WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                android.graphics.PixelFormat.OPAQUE
-            )
-            runCatching { windowManager().addView(view, params) }.onSuccess { blackout = view }
-        }
-        // safety net: the screen never stays black for long
-        handler.removeCallbacks(hideBlackout)
-        handler.postDelayed(hideBlackout, OverlayPrefs.homeDelayMs(this).toLong() + 2000L)
-    }
+    private fun showBlackout() = BlackActivity.show(this)
 
-    private fun pressDown() {
-        if (!ShizukuManager.isReady) {
-            tap(x, y)
-            return
-        }
-        if (holding) return
-        holding = true
-        sendMotion("DOWN", x, y)
-    }
 
-    private fun pressUp() {
-        if (!holding) return
-        holding = false
-        sendMotion("UP", x, y)
-    }
 
-    private fun sendMotion(action: String, px: Int, py: Int) {
-        io.execute {
-            if (!Shell.motion(action, px, py).ok) handler.post { toast("Press failed: Shizuku isn't running") }
-        }
-    }
+
 
     // One move is queued at a time, so the cursor never falls far behind the pointer.
-    private fun sendMove() {
-        if (!moveInFlight.compareAndSet(false, true)) return
-        val px = x
-        val py = y
-        io.execute {
-            try {
-                Shell.motion("MOVE", px, py)
-            } finally {
-                moveInFlight.set(false)
-            }
-        }
-    }
 
     // direction: 1 swipes down (content moves down), -1 swipes up
-    private fun scroll(direction: Int) {
-        val half = 200 * direction
-        val from = (y - half).coerceIn(0, maxY)
-        val to = (y + half).coerceIn(0, maxY)
-        val column = x
-        press({ Shell.swipe(column, from, column, to, 250) }) {
-            gesture(
-                Path().apply {
-                    moveTo(column.toFloat(), from.toFloat())
-                    lineTo(column.toFloat(), to.toFloat())
-                },
-                250
-            )
-        }
-    }
 
     private fun gesture(path: Path, durationMs: Long) {
         dispatchGesture(
@@ -895,10 +547,7 @@ class OverlayService : AccessibilityService() {
 
     private fun release() {
         getSharedPreferences(OverlayPrefs.PREFS, Context.MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(prefsListener)
-        handler.removeCallbacks(moveTick)
         hideDot()
-        hideCursor()
-        active = false
     }
 
     override fun onUnbind(intent: Intent?): Boolean {
@@ -911,11 +560,6 @@ class OverlayService : AccessibilityService() {
         runCatching { unregisterReceiver(homeReceiver) }
         broadcastOn = false
         handler.removeCallbacks(watcherTick)
-        stopLocalWatcher()
-        if (watcherOn) {
-            watcherOn = false
-            Thread { ElevatedShellManager.watchHome(null) }.start()
-        }
         release()
         io.shutdown()
         super.onDestroy()

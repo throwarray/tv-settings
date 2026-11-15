@@ -267,6 +267,15 @@ object ServiceSettings {
         return Shell.settingsGet("secure", ALWAYS_ON_VPN_LOCKDOWN) == "1"
     }
 
+    // The VPN permission on its own (Special access > VPN): the ACTIVATE_VPN AppOp. Null when it can't be read.
+    fun vpnAllowed(pkg: String): Boolean? {
+        val out = Shell.exec("appops get $pkg ACTIVATE_VPN").takeIf { it.ok }?.output ?: return null
+        return out.contains("allow")
+    }
+
+    fun setVpnPermission(pkg: String, allow: Boolean): Boolean =
+        Shell.appOpsSet(pkg, "ACTIVATE_VPN", if (allow) "allow" else "ignore").ok
+
     fun setAlwaysOnVpnLockdown(context: Context, enabled: Boolean): Boolean =
         putSecure(context, ALWAYS_ON_VPN_LOCKDOWN, if (enabled) "1" else "0")
 

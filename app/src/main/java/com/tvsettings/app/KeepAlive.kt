@@ -30,7 +30,9 @@ object KeepAlive {
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
     )
 
-    fun needed(context: Context) = OverlayPrefs.wantsService(context) || UsageWidget.hasWidgets(context)
+    // The service exists only to keep the accessibility setting enforced. Without that option it never runs,
+    // so there is no foreground notification. The accessibility service keeps running on its own.
+    fun needed(context: Context) = enforcing(context)
 
     // only the accessibility features are enforced; a placed widget alone must not turn the service on
     fun enforcing(context: Context) = OverlayPrefs.wantsService(context) && OverlayPrefs.enforcerEnabled(context)
@@ -118,6 +120,10 @@ class EnforcerService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (!KeepAlive.enforcing(this)) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
         startForegroundCompat()
         handler?.let {
             it.removeCallbacks(periodic)

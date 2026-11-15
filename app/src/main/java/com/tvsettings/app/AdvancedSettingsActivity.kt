@@ -43,6 +43,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Text
@@ -86,15 +87,12 @@ fun AdvancedSettingsScreen() {
     val activity = context as Activity
     val scope = rememberCoroutineScope()
     val shizukuState by ShizukuManager.state
-    val authorized by ShizukuManager.authorized
     val shizukuReady = shizukuState == ShizukuManager.State.READY
     var refreshTick by remember { mutableIntStateOf(0) }
     var loaded by remember { mutableStateOf(false) }
     var writeSecure by remember { mutableStateOf(false) }
-    var logAccess by remember { mutableStateOf(false) }
     var rows by remember { mutableStateOf<List<Pair<String, String>>>(emptyList()) }
     var vpnDot by remember { mutableStateOf(OverlayPrefs.dotEnabled(context)) }
-    var mouseOn by remember { mutableStateOf(OverlayPrefs.mouseEnabled(context)) }
     var enforcerOn by remember { mutableStateOf(OverlayPrefs.enforcerEnabled(context)) }
     var location by remember { mutableStateOf(false) }
     var adbDebugging by remember { mutableStateOf(false) }
@@ -116,12 +114,23 @@ fun AdvancedSettingsScreen() {
     var homeIntercept by remember { mutableStateOf("") }
     var homeLaunch by remember { mutableStateOf("") }
     var homeBoot by remember { mutableStateOf(false) }
-    var cursorName by remember { mutableStateOf("white") }
     var showTouches by remember { mutableStateOf(false) }
     var windowAnim by remember { mutableStateOf("1") }
     var transAnim by remember { mutableStateOf("1") }
     var fontScale by remember { mutableStateOf("1") }
     var secInstall by rememberSaveable { mutableStateOf(false) }
+    var secDebloat by rememberSaveable { mutableStateOf(false) }
+    var debloatUrl by remember { mutableStateOf(Debloat.customUrl(context)) }
+    var debloatStatus by remember { mutableStateOf(Debloat.loadedFrom(context)?.let { "Loaded from $it" } ?: "") }
+    fun runDebloat(url: String, source: String) {
+        scope.launch {
+            debloatStatus = onIo {
+                runCatching { Debloat.download(context, url, source) }
+                    .fold({ "Loaded $it packages" }, { "Download failed: ${it.message}" })
+            }
+        }
+    }
+    var secShizuku by rememberSaveable { mutableStateOf(true) }
     var installUri by remember { mutableStateOf<Uri?>(null) }
     val apkPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
@@ -129,8 +138,11 @@ fun AdvancedSettingsScreen() {
             installUri = uri
         }
     }
-    var scrollName by remember { mutableStateOf("normal") }
     var homeDelay by remember { mutableStateOf("1000") }
+    var homeRemapOn by remember { mutableStateOf(true) }
+    var remapUp by remember { mutableStateOf(false) }
+    var remoteMouse by remember { mutableStateOf(false) }
+    var secRemoteMouse by rememberSaveable { mutableStateOf(false) }
     var diagOpen by rememberSaveable { mutableStateOf(false) }
     var confirmCaches by remember { mutableStateOf(false) }
     var secStatus by rememberSaveable { mutableStateOf(true) }
@@ -149,7 +161,6 @@ fun AdvancedSettingsScreen() {
     val timeoutOptions =
         if (screenOff.isEmpty() || TIMEOUT_PRESETS.any { it.first == screenOff }) TIMEOUT_PRESETS
         else TIMEOUT_PRESETS + (screenOff to "Custom ($screenOff ms)")
-    var blackAct by remember { mutableStateOf(false) }
     val latFocus = remember { FocusRequester() }
     val customFocus = remember { FocusRequester() }
     val ambientFocus = remember { FocusRequester() }
@@ -168,9 +179,11 @@ fun AdvancedSettingsScreen() {
     var locationMode by remember { mutableIntStateOf(0) }
     var rotationForced by remember { mutableStateOf(false) }
     var userRotation by remember { mutableIntStateOf(0) }
-    var mouseSpeed by remember { mutableStateOf(OverlayPrefs.speed(context)) }
     var command by remember {
-        mutableStateOf(context.getSharedPreferences(OverlayPrefs.PREFS, Context.MODE_PRIVATE).getString("last_command", "") ?: "")
+        mutableStateOf(
+            context.getSharedPreferences(OverlayPrefs.PREFS, Context.MODE_PRIVATE)
+                .getString("last_command", "dumpsys deviceidle whitelist") ?: "dumpsys deviceidle whitelist"
+        )
     }
     var output by remember { mutableStateOf("") }
 
@@ -188,7 +201,6 @@ fun AdvancedSettingsScreen() {
 
     val secureTick = rememberSecureSettingsTick()
     LaunchedEffect(shizukuState, refreshTick, secureTick) {
-        logAccess = context.checkSelfPermission("android.permission.READ_LOGS") == PackageManager.PERMISSION_GRANTED
         writeSecure = context.checkSelfPermission("android.permission.WRITE_SECURE_SETTINGS") ==
             PackageManager.PERMISSION_GRANTED
         rows = onIo { collectDiagnostics(context, shizukuState) }
@@ -201,7 +213,6 @@ fun AdvancedSettingsScreen() {
         onIo { SystemSettings.privateDns(context) }.let { dnsMode = it.mode; dnsHost = it.host }
         advertisingId = onIo { SystemSettings.advertisingId(context) }
         vpnDot = OverlayPrefs.dotEnabled(context)
-        mouseOn = OverlayPrefs.mouseEnabled(context)
         enforcerOn = OverlayPrefs.enforcerEnabled(context)
         mockOn = MockLocation.isEnabled(context)
         wifiOn = onIo { SystemSettings.wifiEnabled(context) }
@@ -211,20 +222,25 @@ fun AdvancedSettingsScreen() {
         homeIntercept = OverlayPrefs.homeRedirectTarget(context)
         homeLaunch = OverlayPrefs.homeLaunchTarget(context)
         homeBoot = OverlayPrefs.homeOnBoot(context)
-        cursorName = OverlayPrefs.cursorColorName(context)
         showTouches = onIo { TableSettings.read(context, "system", "show_touches") == "1" }
         windowAnim = onIo { TableSettings.read(context, "global", "window_animation_scale") ?: "1" }
         transAnim = onIo { TableSettings.read(context, "global", "transition_animation_scale") ?: "1" }
         fontScale = onIo { TableSettings.read(context, "system", "font_scale") ?: "1" }
         privacyOn = onIo { KeySettings.privacy.associate { it.key to KeySettings.isOn(context, it) } }
-        privacyRaw = onIo { KeySettings.privacy.associate { it.key to (KeySettings.read(context, it.key) ?: "unset") } }
+        privacyRaw = onIo {
+            KeySettings.privacy.flatMap { flag ->
+                flag.allKeys.map { it to (KeySettings.read(context, it) ?: "unset") }
+            }.toMap()
+        }
         screenOff = onIo { KeySettings.read(context, "screen_off_timeout") } ?: ""
         screenDim = onIo { KeySettings.isOn(context, "screen_dimming") }
         ambientTo = onIo { KeySettings.read(context, "ambient_inactivity_to") } ?: ""
         ambientOn = onIo { KeySettings.isOn(context, "ambient_experience_enabled") }
-        scrollName = OverlayPrefs.scrollSpeedName(context)
         homeDelay = OverlayPrefs.homeDelayMs(context).toString()
-        blackAct = OverlayPrefs.blackActivity(context)
+        homeRemapOn = RemapEngine.homeRemap(context)
+        if (shizukuReady) onIo { RemapEngine.ensure(context, OverlayPrefs.homeLaunchTarget(context)) }
+        remapUp = RemapEngine.active(context)
+        remoteMouse = RemapEngine.mouseOn(context)
         nightMode = AppTheme.systemNight(context)
         appTheme = AppTheme.mode(context)
         locationMode = onIo { SystemSettings.locationMode(context) }
@@ -232,7 +248,6 @@ fun AdvancedSettingsScreen() {
         mockLon = MockLocation.longitude(context)
         rotationForced = onIo { SystemSettings.rotationForced(context) }
         userRotation = onIo { SystemSettings.userRotation(context) }
-        mouseSpeed = OverlayPrefs.speed(context)
         loaded = true
     }
 
@@ -261,7 +276,9 @@ fun AdvancedSettingsScreen() {
             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                 CompactIconButton(Icons.AutoMirrored.Filled.KeyboardArrowLeft, "Back") { activity.finish() }
                 CompactIconButton(Icons.Default.Refresh, "Refresh") { refreshTick++ }
-                CompactTextButton("?", "Help") { context.startActivity(Intent(context, HelpActivity::class.java)) }
+                CompactTextButton("?", context.getString(R.string.about_button)) {
+                    context.startActivity(Intent(context, HelpActivity::class.java))
+                }
             }
         }
         Spacer(modifier = Modifier.height(10.dp))
@@ -282,6 +299,22 @@ fun AdvancedSettingsScreen() {
                     item { SectionHeader(context.getString(R.string.section_status), secStatus) { secStatus = !secStatus } }
                     if (secStatus) {
                         indentedItem {
+                            ToggleRow(
+                                context.getString(R.string.shizuku_permission),
+                                shizukuReady,
+                                subtitle = context.getString(when (shizukuState) {
+                                    ShizukuManager.State.READY -> R.string.shizuku_connected
+                                    ShizukuManager.State.CONNECTING -> R.string.shizuku_connecting
+                                    ShizukuManager.State.NEEDS_PERMISSION -> R.string.shizuku_needs_permission
+                                    ShizukuManager.State.NOT_RUNNING -> R.string.shizuku_startup_note
+                                }),
+                                enabled = true,
+                            ) { want ->
+                                if (want) ShizukuManager.requestPermission(activity)
+                                else context.toast(context.getString(R.string.shizuku_revoke_hint))
+                            }
+                        }
+                        indentedItem {
                             ActionRow(context.getString(R.string.advanced_clear_caches), AppIcons.Layers, enabled = shizukuReady,
                                 subtitle = context.getString(R.string.clear_caches_subtitle)) { confirmCaches = true }
                             if (confirmCaches) {
@@ -300,54 +333,48 @@ fun AdvancedSettingsScreen() {
                                 )
                             }
                         }
-                    // This toggle represents whether the Shizuku app is authorized, not daemon availability.
-                    indentedToggleItems(
-                        listOf(
-                            ToggleSpec(
-                                "shizuku_authorized", R.string.advanced_shizuku, authorized,
-                                subtitle = when (shizukuState) {
-                                    ShizukuManager.State.READY -> context.getString(R.string.shizuku_connected)
-                                    ShizukuManager.State.CONNECTING -> context.getString(R.string.shizuku_connecting)
-                                    ShizukuManager.State.NEEDS_PERMISSION -> context.getString(R.string.shizuku_needs_permission)
-                                    ShizukuManager.State.NOT_RUNNING -> context.getString(
-                                        if (authorized) R.string.shizuku_authorized_not_running else R.string.shizuku_not_running
-                                    )
+                        indentedToggleItems(
+                            listOf(
+                                ToggleSpec(
+                                    "write_secure_settings", R.string.advanced_write_secure_settings, writeSecure,
+                                    subtitleRes = R.string.write_secure_settings_subtitle,
+                                    enabled = shizukuReady,
+                                ) { want ->
+                                    scope.launch {
+                                        val ok = onIo { ShizukuManager.setWriteSecureSettings(want) }
+                                        if (!ok) context.toast("Couldn't change WRITE_SECURE_SETTINGS")
+                                        refreshTick++
+                                    }
                                 },
-                            ) { ShizukuManager.requestPermission(activity) },
-                            ToggleSpec(
-                                "write_secure_settings", R.string.advanced_write_secure_settings, writeSecure,
-                                subtitleRes = R.string.write_secure_settings_subtitle,
-                                enabled = shizukuReady,
-                            ) { want ->
-                                scope.launch {
-                                    val ok = onIo { ShizukuManager.setWriteSecureSettings(want) }
-                                    if (!ok) context.toast("Couldn't change WRITE_SECURE_SETTINGS")
-                                    refreshTick++
-                                }
-                            },
-                            ToggleSpec(
-                                "unknown_sources", R.string.advanced_apps_other_sources, unknownSources,
-                                subtitleRes = R.string.unknown_sources_subtitle,
-                                enabled = canChange,
-                            ) { want -> change("apps from other sources") { SystemSettings.setUnknownSources(context, want) } },
-                            ToggleSpec(
-                                "accessibility_keep_alive", R.string.advanced_keep_accessibility_on, enforcerOn,
-                                subtitleRes = R.string.accessibility_keep_alive_subtitle,
-                                enabled = canChange,
-                            ) { want ->
-                                change("keep accessibility on") {
-                                    OverlayPrefs.setEnforcer(context, want)
-                                    KeepAlive.sync(context)
-                                    KeepAlive.applyIdleWhitelist(context, want)
-                                    true
-                                }
-                            },
+                                ToggleSpec(
+                                    "accessibility_keep_alive", R.string.advanced_keep_accessibility_on, enforcerOn,
+                                    subtitleRes = R.string.accessibility_keep_alive_subtitle,
+                                    enabled = canChange,
+                                ) { want ->
+                                    change("keep accessibility on") {
+                                        OverlayPrefs.setEnforcer(context, want)
+                                        KeepAlive.sync(context)
+                                        KeepAlive.applyIdleWhitelist(context, want)
+                                        true
+                                    }
+                                },
+                            )
                         )
-                    )
-
                     }
                     item { SectionHeader(context.getString(R.string.section_network), secNetwork) { secNetwork = !secNetwork } }
                     if (secNetwork) {
+                        indentedItem {
+                            ActionRow(
+                                context.getString(R.string.shizuku_open),
+                                Icons.Default.PlayArrow,
+                                subtitle = context.getString(when (shizukuState) {
+                                    ShizukuManager.State.READY -> R.string.shizuku_connected
+                                    ShizukuManager.State.CONNECTING -> R.string.shizuku_connecting
+                                    ShizukuManager.State.NEEDS_PERMISSION -> R.string.shizuku_needs_permission
+                                    ShizukuManager.State.NOT_RUNNING -> R.string.shizuku_startup_note
+                                }),
+                            ) { ShizukuManager.requestPermission(activity) }
+                        }
                     indentedToggleItems(
                         listOfNotNull(
                             ToggleSpec("wifi", R.string.advanced_wifi, wifiOn, enabled = canChange) { want ->
@@ -369,16 +396,16 @@ fun AdvancedSettingsScreen() {
                             ) { want -> change("VPN status dot") { OverlayPrefs.setDot(context, want) } },
                         )
                     )
-                    indentedItem {
-                        ActionRow(
-                            context.getString(R.string.advanced_reset_advertising_id),
-                            AppIcons.Card,
-                            enabled = advertisingId != null && canChange,
-                        ) {
-                            change("advertising ID") { SystemSettings.resetAdvertisingId(context) }
+                        indentedItem {
+                            ActionRow(context.getString(R.string.wireless_debugging_settings), AppIcons.ExternalLink) {
+                                runCatching {
+                                    activity.startActivity(Intent(Settings.ACTION_WIRELESS_SETTINGS))
+                                }.onFailure {
+                                    runCatching { activity.startActivity(Intent(Settings.ACTION_SETTINGS)) }
+                                        .onFailure { context.toast(context.getString(R.string.wireless_settings_unavailable)) }
+                                }
+                            }
                         }
-                    }
-
                     indentedItem {
                         val selected = when (dnsMode) {
                             "off" -> "off"
@@ -422,13 +449,7 @@ fun AdvancedSettingsScreen() {
                         ) {
                             scope.launch {
                                 val r = onIo {
-                                    val shellResult = Shell.exec(command)
-                                    val shellValue = shellResult.output.trim()
-                                    if (shellResult.ok && shellValue.isNotEmpty() && shellValue != "null") {
-                                        shellResult
-                                    } else {
-                                        readSettingsCommand(context, command) ?: shellResult
-                                    }
+                                    Shell.exec(command)
                                 }
                                 output = "exit ${r.exitCode}\n${r.output.trim()}".take(4000)
                             }
@@ -442,17 +463,36 @@ fun AdvancedSettingsScreen() {
                         indentedToggleItems(KeySettings.privacy.map { flag ->
                             ToggleSpec(
                                 flag.key, flag.titleRes, privacyOn[flag.key] == true,
-                                subtitle = "${flag.key} = ${privacyRaw[flag.key] ?: "unset"}",
+                                subtitle = flag.allKeys.joinToString("\n") { "$it = ${privacyRaw[it] ?: "unset"}" },
                                 enabled = canChange,
                             ) { want ->
                                     privacyOn = privacyOn + (flag.key to want)
-                                    privacyRaw = privacyRaw + (flag.key to flag.valueFor(want))
+                                    privacyRaw = privacyRaw + flag.allKeys.associateWith { flag.valueFor(want) }
                                     change(context.getString(flag.titleRes)) { flag.allKeys.all { KeySettings.write(context, it, flag.valueFor(want)) } }
                             }
                         })
+                        indentedItem {
+                            ActionRow(
+                                context.getString(R.string.advanced_reset_advertising_id),
+                                AppIcons.Card,
+                                enabled = advertisingId != null && canChange,
+                            ) {
+                                change("advertising ID") { SystemSettings.resetAdvertisingId(context) }
+                            }
+                        }
                     }
                     item { SectionHeader(context.getString(R.string.section_screensaver_appearance), secScreensaver) { secScreensaver = !secScreensaver } }
                     if (secScreensaver) {
+                    indentedToggleItems(listOf(
+                        ToggleSpec(
+                                "show_touches", R.string.advanced_show_touches, showTouches,
+                                subtitleRes = R.string.show_touches_subtitle,
+                                enabled = canChange,
+                            ) { want ->
+                                showTouches = want
+                                change("show touches") { TableSettings.put(context, "system", "show_touches", if (want) "1" else "0") }
+                            },
+                    ))
                     indentedToggleItems(
                         listOfNotNull(
                             ToggleSpec(
@@ -460,24 +500,16 @@ fun AdvancedSettingsScreen() {
                                 subtitleRes = R.string.force_rotation_subtitle,
                                 enabled = shizukuReady,
                             ) { want -> change("rotation") { SystemSettings.setRotation(context, want, userRotation) } },
-                            ToggleSpec(
-                                "ambient_experience", R.string.advanced_ambient_experience, ambientOn,
-                                subtitleRes = R.string.ambient_experience_subtitle,
-                                enabled = canChange,
-                            ) { want ->
-                                ambientOn = want
-                                change("ambient experience") { KeySettings.write(context, "ambient_experience_enabled", if (want) "1" else "0") }
-                            },
-                            ToggleSpec(
-                                "screen_dimming", R.string.advanced_screen_dimming, screenDim,
-                                subtitleRes = R.string.screen_dimming_subtitle,
-                                enabled = canChange,
-                            ) { want ->
-                                screenDim = want
-                                change("screen dimming") { KeySettings.write(context, "screen_dimming", if (want) "1" else "0") }
-                            },
                         ),
                     )
+                    indentedItem {
+                        DropdownRow(
+                            label = context.getString(R.string.advanced_rotation),
+                            options = listOf("0" to "0°", "1" to "90°", "2" to "180°", "3" to "270°"),
+                            selectedId = userRotation.toString(),
+                            enabled = shizukuReady,
+                        ) { id -> change("rotation") { SystemSettings.setRotation(context, rotationForced, id.toInt()) } }
+                    }
                     indentedItem {
                         DropdownRow(
                             label = context.getString(R.string.advanced_dark_mode),
@@ -502,14 +534,6 @@ fun AdvancedSettingsScreen() {
                             activity.recreate()
                         }
                     }
-                    indentedItem {
-                        DropdownRow(
-                            label = context.getString(R.string.advanced_rotation),
-                            options = listOf("0" to "0°", "1" to "90°", "2" to "180°", "3" to "270°"),
-                            selectedId = userRotation.toString(),
-                            enabled = shizukuReady,
-                        ) { id -> change("rotation") { SystemSettings.setRotation(context, rotationForced, id.toInt()) } }
-                    }
                         indentedItem {
                             DropdownRow(
                                 label = context.getString(R.string.advanced_screen_off_timeout),
@@ -524,6 +548,14 @@ fun AdvancedSettingsScreen() {
                                 change("screen off timeout") { KeySettings.writeTimeout(context, id) }
                             }
                         }
+                        indentedToggleItems(listOf(ToggleSpec(
+                            "screen_dimming", R.string.advanced_screen_dimming, screenDim,
+                            subtitleRes = R.string.screen_dimming_subtitle,
+                            enabled = canChange,
+                        ) { want ->
+                            screenDim = want
+                            change("screen dimming") { KeySettings.write(context, "screen_dimming", if (want) "1" else "0") }
+                        }))
                         indentedItem {
                             TextFieldRow(
                                 context.getString(R.string.advanced_custom_timeout), screenOff, enabled = canChange, focusRequester = customFocus, focusDown = ambientFocus,
@@ -553,6 +585,14 @@ fun AdvancedSettingsScreen() {
                                 }
                             }
                         }
+                        indentedToggleItems(listOf(ToggleSpec(
+                            "ambient_experience", R.string.advanced_ambient_experience, ambientOn,
+                            subtitleRes = R.string.ambient_experience_subtitle,
+                            enabled = canChange,
+                        ) { want ->
+                            ambientOn = want
+                            change("ambient experience") { KeySettings.write(context, "ambient_experience_enabled", if (want) "1" else "0") }
+                        }))
                     }
                     item { SectionHeader(context.getString(R.string.section_location), secLocation) { secLocation = !secLocation } }
                     if (secLocation) {
@@ -624,61 +664,20 @@ fun AdvancedSettingsScreen() {
                     }
                     indentedItem { CopyRow(context.getString(R.string.advanced_current_location), currentFix) }
                     }
-                    item { SectionHeader(context.getString(R.string.section_mouse_toggle), secMouse) { secMouse = !secMouse } }
-                    if (secMouse) {
+                    item { SectionHeader(context.getString(R.string.section_remote_mouse), secRemoteMouse) { secRemoteMouse = !secRemoteMouse } }
+                    if (secRemoteMouse) {
                     indentedToggleItems(
                         listOf(
                             ToggleSpec(
-                                "mouse", R.string.advanced_mouse, mouseOn,
-                                subtitleRes = R.string.mouse_toggle_subtitle,
-                                enabled = canChange,
-                            ) { want -> change("mouse") { OverlayPrefs.setMouse(context, want) } },
-                            ToggleSpec(
-                                "show_touches", R.string.advanced_show_touches, showTouches,
-                                subtitleRes = R.string.show_touches_subtitle,
-                                enabled = canChange,
+                                "remote_mouse", R.string.remote_mouse, remoteMouse,
+                                subtitleRes = R.string.remote_mouse_subtitle,
+                                enabled = shizukuReady,
                             ) { want ->
-                                showTouches = want
-                                change("show touches") { TableSettings.put(context, "system", "show_touches", if (want) "1" else "0") }
+                                remoteMouse = want
+                                scope.launch { onIo { RemapEngine.setMouse(context, want) } }
                             },
                         )
                     )
-                    indentedItem {
-                        DropdownRow(
-                            label = context.getString(R.string.advanced_mouse_speed),
-                            options = listOf("slow" to "Slow", "medium" to "Medium", "fast" to "Fast", "faster" to "Faster"),
-                            selectedId = mouseSpeed,
-                        ) { id ->
-                            OverlayPrefs.setSpeed(context, id)
-                            mouseSpeed = id
-                        }
-                    }
-                    indentedItem {
-                        DropdownRow(
-                            label = context.getString(R.string.advanced_cursor_colour),
-                            options = listOf(
-                                "white" to "White", "yellow" to "Yellow", "cyan" to "Cyan",
-                                "green" to "Green", "red" to "Red", "magenta" to "Magenta",
-                            ),
-                            selectedId = cursorName,
-                            subtitle = context.getString(R.string.cursor_colour_subtitle),
-                        ) { id ->
-                            cursorName = id
-                            OverlayPrefs.setCursorColor(context, id)
-                            runCatching { overlayServiceInstance?.refreshCursor() }
-                        }
-                    }
-                    indentedItem {
-                        DropdownRow(
-                            label = context.getString(R.string.advanced_scroll_speed),
-                            options = listOf("slow" to "Slow", "normal" to "Normal", "fast" to "Fast"),
-                            selectedId = scrollName,
-                            subtitle = context.getString(R.string.scroll_speed_subtitle),
-                        ) { id ->
-                            scrollName = id
-                            OverlayPrefs.setScrollSpeed(context, id)
-                        }
-                    }
                     }
                     item { SectionHeader(context.getString(R.string.section_home_redirect), secHomeRedirect) { secHomeRedirect = !secHomeRedirect } }
                     if (secHomeRedirect) {
@@ -697,27 +696,9 @@ fun AdvancedSettingsScreen() {
                                 homeBoot = want
                                 change("boot redirect") { OverlayPrefs.setHomeOnBoot(context, want) }
                             },
-                            ToggleSpec(
-                                "black_screen_activity", R.string.advanced_black_screen_as_activity, blackAct,
-                                subtitleRes = R.string.black_screen_activity_subtitle,
-                                enabled = canChange && homeOn,
-                            ) { want ->
-                                blackAct = want
-                                OverlayPrefs.setBlackActivity(context, want)
-                            },
-                            ToggleSpec(
-                                "read_log_access", R.string.advanced_log_access, logAccess,
-                                subtitleRes = R.string.log_access_subtitle,
-                                enabled = shizukuReady,
-                            ) { want ->
-                                logAccess = want
-                                scope.launch {
-                                    val ok = onIo { Shell.permission(context.packageName, "android.permission.READ_LOGS", want).ok }
-                                    if (!ok) context.toast("Couldn't change log access")
-                                }
-                            },
                         )
                     )
+                    if (!remapUp) {
                     indentedItem {
                         DropdownRow(
                             label = context.getString(R.string.advanced_intercept_app),
@@ -745,6 +726,7 @@ fun AdvancedSettingsScreen() {
                             change("home redirect") { OverlayPrefs.setHomeRedirect(context, homeOn, comp, homeLaunch) }
                         }
                     }
+                    }
                     indentedItem {
                         DropdownRow(
                             label = context.getString(R.string.advanced_launch_app),
@@ -757,6 +739,7 @@ fun AdvancedSettingsScreen() {
                                 ?.let { android.content.ComponentName(pkg, it.className).flattenToString() }
                             if (first != null) {
                                 homeLaunch = first
+                                scope.launch { onIo { RemapEngine.updateRules(context, first) } }
                                 change("home redirect") { OverlayPrefs.setHomeRedirect(context, homeOn, homeIntercept, first) }
                             }
                         }
@@ -770,10 +753,27 @@ fun AdvancedSettingsScreen() {
                             enabled = canChange && homeOn,
                         ) { comp ->
                             homeLaunch = comp
+                            scope.launch { onIo { RemapEngine.updateRules(context, comp) } }
                             change("home redirect") { OverlayPrefs.setHomeRedirect(context, homeOn, homeIntercept, comp) }
                         }
                     }
 
+                    indentedItem {
+                        ToggleRow(
+                            "Home remap",
+                            homeRemapOn,
+                            subtitle = "Home from the remote opens the launcher. Needs Shizuku",
+                            enabled = shizukuReady,
+                        ) { want ->
+                            homeRemapOn = want
+                            RemapEngine.setHomeRemap(context, want)
+                            scope.launch {
+                                val ok = onIo { RemapEngine.sync(context) }
+                                if (!ok) context.toast("Remap engine didn't start: ${RemapEngine.lastError}")
+                                remapUp = RemapEngine.active(context)
+                            }
+                        }
+                    }
                     indentedItem {
                         DropdownRow(
                             label = context.getString(R.string.advanced_redirect_delay),
@@ -790,8 +790,54 @@ fun AdvancedSettingsScreen() {
                         }
                     }
                     }
+                    item { SectionHeader(context.getString(R.string.section_debloat), secDebloat) { secDebloat = !secDebloat } }
+                    if (secDebloat) {
+                        indentedItem { Text(context.getString(R.string.debloat_disclaimer), color = Oled.textSecondary, fontSize = 10.sp, lineHeight = 12.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)) }
+                        indentedItem {
+                            val id = Debloat.deviceId()
+                            ActionRow(context.getString(R.string.debloat_download_device), AppIcons.Card, enabled = id != null,
+                                subtitle = id ?: context.getString(R.string.debloat_device_unknown)) {
+                                val url = Debloat.resolve(Debloat.TELLYSCOPE, id) ?: return@ActionRow
+                                runDebloat(url, "tellyscope:$id")
+                            }
+                        }
+                        indentedItem {
+                            ActionRow(context.getString(R.string.debloat_download_uad), AppIcons.Card,
+                                subtitle = context.getString(R.string.debloat_uad_subtitle)) {
+                                runDebloat(Debloat.UAD_NG, "uad-ng")
+                            }
+                        }
+                        indentedItem {
+                            TextFieldRow(
+                                label = context.getString(R.string.debloat_custom_url),
+                                value = debloatUrl,
+                                subtitle = context.getString(R.string.debloat_custom_subtitle),
+                                onCommit = { debloatUrl = it; Debloat.setCustomUrl(context, it) },
+                            )
+                        }
+                        indentedItem {
+                            ActionRow(context.getString(R.string.debloat_download_custom), AppIcons.Card, enabled = debloatUrl.isNotBlank()) {
+                                val url = Debloat.resolve(debloatUrl, Debloat.deviceId()) ?: return@ActionRow
+                                runDebloat(url, "custom")
+                            }
+                        }
+                        indentedItem {
+                            ActionRow(context.getString(R.string.debloat_clear), AppIcons.Layers) {
+                                Debloat.clear(context)
+                                debloatStatus = context.getString(R.string.debloat_cleared)
+                            }
+                        }
+                        if (debloatStatus.isNotEmpty()) indentedItem {
+                            Text(debloatStatus, color = Oled.textSecondary, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
+                        }
+                    }
                     item { SectionHeader(context.getString(R.string.section_install_apk), secInstall) { secInstall = !secInstall } }
                     if (secInstall) {
+                        indentedToggleItems(listOf(ToggleSpec(
+                            "unknown_sources", R.string.advanced_apps_other_sources, unknownSources,
+                            subtitleRes = R.string.unknown_sources_subtitle,
+                            enabled = canChange,
+                        ) { want -> change("apps from other sources") { SystemSettings.setUnknownSources(context, want) } }))
                         indentedItem {
                             ActionRow(context.getString(R.string.advanced_browse_apk), AppIcons.Card) {
                                 apkPicker.launch(arrayOf("application/vnd.android.package-archive"))
@@ -922,17 +968,6 @@ fun <T> LazyListScope.indentedItems(list: List<T>, key: ((T) -> Any)? = null, co
 
 fun LazyListScope.indentedToggleItems(settings: List<ToggleSpec>) {
     indentedItems(settings, key = { it.id }) { ToggleRow(it) }
-}
-
-private fun readSettingsCommand(context: Context, command: String): ShellResult? {
-    val match = Regex("\\s*settings\\s+get\\s+(secure|system|global)\\s+([A-Za-z0-9_.]+)\\s*").matchEntire(command)
-        ?: return null
-    return try {
-        val value = TableSettings.read(context, match.groupValues[1], match.groupValues[2])
-        ShellResult(0, value ?: "null")
-    } catch (_: SecurityException) {
-        null
-    }
 }
 
 private val TIMEOUT_PRESETS = listOf(

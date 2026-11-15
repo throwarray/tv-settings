@@ -66,6 +66,19 @@ object AppIcons {
         }
     }
 
+    val ExternalLink: ImageVector by lazy {
+        icon("ExternalLink") {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(4f, 4f); lineTo(14f, 4f); lineTo(14f, 6f); lineTo(6f, 6f)
+                lineTo(6f, 18f); lineTo(18f, 18f); lineTo(18f, 10f); lineTo(20f, 10f)
+                lineTo(20f, 20f); lineTo(4f, 20f); close()
+                moveTo(13f, 3f); lineTo(21f, 3f); lineTo(21f, 11f); lineTo(19f, 11f)
+                lineTo(19f, 6.4f); lineTo(11.7f, 13.7f); lineTo(10.3f, 12.3f)
+                lineTo(17.6f, 5f); lineTo(13f, 5f); close()
+            }
+        }
+    }
+
     val Undo: ImageVector by lazy {
         icon("Undo") {
             path(fill = SolidColor(Color.White)) {

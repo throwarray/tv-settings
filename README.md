@@ -1,6 +1,6 @@
 # TV Settings
 
-Per-app control and hidden settings for Fire TV and Android TV, built with Jetpack Compose and driven by a D-pad.
+App control and hidden settings for Fire TV and Android TV, built with Jetpack Compose and driven by a D-pad.
 
 Features marked * need [Shizuku](https://shizuku.rikka.app/) running.
 
