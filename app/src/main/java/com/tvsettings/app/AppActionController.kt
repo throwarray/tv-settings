@@ -7,13 +7,10 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.provider.Settings
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
 
 object AppActionController {
     const val PREFS = "tvsettings"
     const val KEY_HOME_PIN = "home_pin"
-
 
     private fun homeIntent() = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
 
@@ -188,17 +185,6 @@ object AppActionController {
         return entries
     }
 
-    suspend fun setIdleWhitelist(context: Context, packageName: String, enabled: Boolean): Boolean {
-        val now = onIo {
-            Shell.idleWhitelist(packageName, enabled)
-            idleWhitelistEntries()?.containsKey(packageName)
-        }
-        if (now == null || now != enabled) {
-            context.toast("Couldn't ${if (enabled) "add to" else "remove from"} the idle whitelist")
-        }
-        return now ?: !enabled
-    }
-
     // ---- Launcher widget binding (appwidget grantbind) ----
 
     private const val WIDGET_PREFS = "widget_bind"
@@ -206,6 +192,8 @@ object AppActionController {
     /** Parses "Grants:" in dumpsys appwidget; falls back to what this app last set. */
     fun widgetBindGranted(context: Context, packageName: String): Boolean {
         if (ShizukuManager.isReady) {
+            val direct = Shell.widgetHasBind(packageName).output.trim()
+            if (direct == "true" || direct == "false") return direct == "true"
             val r = Shell.dumpsys("appwidget")
             if (r.ok) {
                 val grant = Regex("""user=(\d+)\s+package=([A-Za-z0-9_.]+)""")

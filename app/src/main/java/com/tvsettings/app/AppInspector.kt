@@ -9,7 +9,6 @@ import android.os.Build
 
 object AppInspector {
 
-
     // "OP: mode; ..." (older) or "OP (mode):" (newer); uid ops are prefixed "Uid mode: "
     private val OP_LINE = Regex("""^(Uid mode:\s*)?([A-Z][A-Z0-9_]+)(?::\s*|\s+\()([a-z_]+)""")
 
@@ -21,8 +20,6 @@ object AppInspector {
         "deny" to "Deny (error)",
         "foreground" to "Foreground only",
     )
-
-    fun modeLabel(mode: String): String = APP_OP_MODES.firstOrNull { it.first == mode }?.second ?: mode
 
     /** Always listed, even with no recorded entry (as "default"). */
     private val CURATED = listOf(
@@ -49,7 +46,6 @@ object AppInspector {
         if (Build.VERSION.SDK_INT >= 33) Shell.permission(pkg, "android.permission.POST_NOTIFICATIONS", allowed)
         return r.clean
     }
-
 
     private fun pretty(raw: String): String =
         raw.lowercase().replace('_', ' ').replaceFirstChar { it.uppercase() }
@@ -112,6 +108,7 @@ object AppInspector {
             val tag = if (runtime) "" else "[${protLabel(pi, development)}] "
             val kind = when {
                 name == "android.permission.ACCESS_MOCK_LOCATION" -> "appop"
+                name.endsWith(".BIND_APPWIDGET") -> "appwidget"
                 runtime -> "runtime"
                 (pi.protectionFlags and PermissionInfo.PROTECTION_FLAG_APPOP) != 0 -> "appop"
                 pi.protection == PermissionInfo.PROTECTION_NORMAL -> "fixed"

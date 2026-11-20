@@ -1,17 +1,17 @@
 package com.tvsettings.app
 
-import android.os.Build
 import android.app.AppOpsManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
-import android.content.pm.PackageManager
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.location.Criteria
 import android.location.Location
 import android.location.LocationManager
+import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -52,29 +52,6 @@ object MockLocation {
     }
 
     private const val FINE = "android.permission.ACCESS_FINE_LOCATION"
-
-    // Blocking. Grants the location permission through Shizuku if needed, re-applies the saved coordinates, waits for
-    // a fix and describes the location the system resolves.
-    fun applyAndResolve(context: Context): String {
-        if (context.checkSelfPermission(FINE) != PackageManager.PERMISSION_GRANTED) {
-            Shell.permission(context.packageName, FINE, true)
-        }
-        if (context.checkSelfPermission(FINE) != PackageManager.PERMISSION_GRANTED) return "Needs the location permission"
-        if (isEnabled(context)) start(context)
-        Thread.sleep(1500)
-        val manager = context.getSystemService(LocationManager::class.java)
-        val best = listOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
-            .mapNotNull {
-                try {
-                    manager.getLastKnownLocation(it)
-                } catch (_: Exception) {
-                    null
-                }
-            }
-            .maxByOrNull { it.time }
-            ?: return "(no fix)"
-        return String.format(Locale.US, "%.5f, %.5f  %s ±%.0f m", best.latitude, best.longitude, best.provider, best.accuracy)
-    }
 
     // Last known fix from the system, without applying anything. Needs the location permission.
     fun currentLocation(context: Context): String {

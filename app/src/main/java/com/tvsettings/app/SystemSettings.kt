@@ -1,10 +1,10 @@
 package com.tvsettings.app
 
-import android.os.Build
 import android.content.Context
 import android.content.pm.PackageManager
 import android.location.LocationManager
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.provider.Settings
 import java.util.UUID
 
@@ -21,6 +21,7 @@ object SystemSettings {
     val SYSTEM_KEYS = listOf("accelerometer_rotation", "user_rotation")
 
     val PRIVATE_DNS_PRESETS = listOf(
+        Triple("adguard_family", "AdGuard Family", "family.adguard-dns.com"),
         Triple("cloudflare", "Cloudflare", "one.one.one.one"),
         Triple("google", "Google", "dns.google"),
         Triple("adguard", "AdGuard", "dns.adguard-dns.com"),
@@ -146,7 +147,7 @@ object SystemSettings {
     // Shell when Shizuku is up (works on every Android version); otherwise the WifiManager call.
     @Suppress("DEPRECATION")
     fun setWifi(context: Context, enabled: Boolean): Boolean {
-        if (ShizukuManager.isReady) return Shell.exec("svc wifi ${if (enabled) "enable" else "disable"}").ok
+        if (ShizukuManager.isReady) return Shell.wifi(enabled).ok
         return wifi(context).setWifiEnabled(enabled)
     }
 

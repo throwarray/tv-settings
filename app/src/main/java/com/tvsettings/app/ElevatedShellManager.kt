@@ -26,10 +26,6 @@ object ElevatedShellManager {
         if (binder != null) callback() else connectCallbacks.add(callback)
     }
 
-    fun onDisconnected(callback: () -> Unit) {
-        if (binder == null) callback() else disconnectCallbacks.add(callback)
-    }
-
     fun bind(context: Context) {
         if (connection != null) return
 

@@ -1,11 +1,11 @@
 package com.tvsettings.app
 
-import android.provider.Settings
-import android.net.Uri
-import android.content.Intent
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
+import android.provider.Settings
 
 object AppManifest {
     // The declarations from the installed package: what the manifest says, without decoding the XML.
@@ -52,7 +52,7 @@ object AppBackup {
         if (src.contains('\'')) return false to "unexpected path"
         val code = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
         val dest = "$dir/${pkg}_v$code.apk"
-        val ok = Shell.exec("cp '$src' '$dest'").ok
+        val ok = Shell.copy(src, dest).ok
         return ok to dest
     }
 }

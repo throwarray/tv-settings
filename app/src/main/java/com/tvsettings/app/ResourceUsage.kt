@@ -1,7 +1,7 @@
 package com.tvsettings.app
 
-import android.content.Context
 import android.app.ActivityManager
+import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -42,10 +42,6 @@ object ResourceUsage {
     private var previous: Raw? = null
     private var previousGlobal: Pair<Long, Long>? = null
 
-    // One shell run: total CPU, memory, then every process
-    private const val FULL = "head -n 1 /proc/stat; echo @@MEM; head -n 3 /proc/meminfo; echo @@PS; " +
-        "ps -A -o PID,RSS,NAME; echo @@STAT; " +
-        "for f in /proc/[0-9]*/stat; do read -r l 2>/dev/null < \"\$f\" && echo \"\$l\"; done"
 
     private fun kb(line: String): Long = line.split(Regex("\\s+")).getOrNull(1)?.toLongOrNull() ?: 0L
 
@@ -60,9 +56,9 @@ object ResourceUsage {
         for (raw in output.lineSequence()) {
             val line = raw.trim()
             if (line.isEmpty()) continue
-            if (line == "@@MEM") { section = "MEM"; continue }
-            if (line == "@@PS") { section = "PS"; continue }
-            if (line == "@@STAT") { section = "STAT"; continue }
+            if (line == Shell.MARK_MEM) { section = "MEM"; continue }
+            if (line == Shell.MARK_PS) { section = "PS"; continue }
+            if (line == Shell.MARK_STAT) { section = "STAT"; continue }
             when (section) {
                 "CPU" -> if (line.startsWith("cpu ")) {
                     val f = line.split(Regex("\\s+")).drop(1).mapNotNull { it.toLongOrNull() }
@@ -99,7 +95,7 @@ object ResourceUsage {
 
     /** Blocking. Percentages are of total CPU since the previous call, so the first call has none. */
     fun sample(): UsageSnapshot? {
-        val result = Shell.exec(FULL)
+        val result = Shell.usageSnapshot()
         if (!result.ok) return null
         val raw = parse(result.output) ?: return null
         val prev = previous
@@ -125,7 +121,7 @@ object ResourceUsage {
     /** Blocking, for the widget. Null without Shizuku, or on the first call. */
     fun globalCpu(): Float? {
         if (!ShizukuManager.isReady) return null
-        val line = Shell.exec("head -n 1 /proc/stat").lines.firstOrNull { it.startsWith("cpu ") } ?: return null
+        val line = Shell.procStat().lines.firstOrNull { it.startsWith("cpu ") } ?: return null
         val f = line.split(Regex("\\s+")).drop(1).mapNotNull { it.toLongOrNull() }
         if (f.size < 5) return null
         val total = f.take(8).sum()

@@ -6,6 +6,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import androidx.annotation.StringRes
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -111,4 +112,12 @@ class AppRegistry(private val context: Context) {
             }
             .sortedBy { it.appName.lowercase() }
     }
+}
+
+// Changes made from the app pane that the list has to show: force stop, enable and disable, uninstall
+object AppEvents {
+    var activeTick by mutableIntStateOf(0)
+    var reloadTick by mutableIntStateOf(0)
+    // set when an app was uninstalled: the list drops that row in place, without a reload or a jump to the top
+    var removed by mutableStateOf<String?>(null)
 }

@@ -49,7 +49,7 @@ fun FileBrowser(
     var dirs by remember { mutableStateOf<List<String>>(emptyList()) }
     var files by remember { mutableStateOf<List<String>>(emptyList()) }
     LaunchedEffect(path) {
-        val listing = onIo { Shell.exec("ls -1Ap '$path' 2>/dev/null").output.lines().filter { it.isNotBlank() } }
+        val listing = onIo { Shell.listDir(path).output.lines().filter { it.isNotBlank() } }
         dirs = listing.filter { it.endsWith("/") }.map { it.trimEnd('/') }.sorted()
         files = listing.filter { !it.endsWith("/") && exts.any { ext -> it.endsWith(ext, ignoreCase = true) } }.sorted()
     }

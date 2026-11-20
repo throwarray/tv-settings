@@ -269,7 +269,7 @@ object ServiceSettings {
 
     // The VPN permission on its own (Special access > VPN): the ACTIVATE_VPN AppOp. Null when it can't be read.
     fun vpnAllowed(pkg: String): Boolean? {
-        val out = Shell.exec("appops get $pkg ACTIVATE_VPN").takeIf { it.ok }?.output ?: return null
+        val out = Shell.appOpsGet(pkg, "ACTIVATE_VPN").takeIf { it.ok }?.output ?: return null
         return out.contains("allow")
     }
 

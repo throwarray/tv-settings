@@ -1,13 +1,11 @@
 package com.tvsettings.app
 
-import androidx.compose.ui.graphics.Color
-import androidx.compose.foundation.focusable
 import android.content.ClipData
 import android.content.ClipboardManager
-import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsFocusedAsState
 import androidx.compose.foundation.layout.Arrangement
@@ -44,7 +42,9 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
@@ -179,6 +179,50 @@ fun CommandRow(command: String, enabled: Boolean, onChange: (String) -> Unit, on
     }
 }
 
+/** Download: link with one start/stop button, a save-as name with a folder button, and progress. */
+@Composable
+fun DownloadRow(
+    url: String,
+    name: String,
+    folder: String,
+    progress: String,
+    running: Boolean,
+    onUrl: (String) -> Unit,
+    onName: (String) -> Unit,
+    onPickFolder: () -> Unit,
+    onToggle: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp)) {
+        Text(stringResource(R.string.label_apk_url), color = Oled.textPrimary, fontSize = 12.sp, lineHeight = 14.sp)
+        Spacer(modifier = Modifier.height(3.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            InlineField(
+                value = url, enabled = true, placeholder = stringResource(R.string.subtitle_apk_url),
+                modifier = Modifier.weight(1f), onCommit = onUrl
+            )
+            CompactIconButton(
+                if (running) AppIcons.Stop else Icons.Default.PlayArrow,
+                stringResource(if (running) R.string.label_cancel_download else R.string.label_download_apk),
+                modifier = Modifier.alpha(if (running) busyPulse() else 1f),
+            ) { onToggle() }
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(stringResource(R.string.label_save_as), color = Oled.textPrimary, fontSize = 12.sp, lineHeight = 14.sp)
+        Spacer(modifier = Modifier.height(3.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            InlineField(
+                value = name, enabled = true, placeholder = stringResource(R.string.label_save_as),
+                modifier = Modifier.weight(1f), onCommit = onName
+            )
+            CompactIconButton(AppIcons.Folder, stringResource(R.string.label_choose_folder)) { onPickFolder() }
+        }
+        Text(
+            stringResource(R.string.label_folder_value, folder) + if (progress.isNotEmpty()) "  -  $progress" else "",
+            color = Oled.textSecondary, fontSize = 10.sp,
+        )
+    }
+}
+
 /** Command output: scrolls, highlights when focused, and OK or the icon copies it. */
 @Composable
 fun OutputBox(output: String) {
@@ -268,6 +312,61 @@ fun CopyRow(label: String, value: String) {
         }
         Box(modifier = Modifier.background(Oled.row, RoundedCornerShape(6.dp)).padding(horizontal = 8.dp, vertical = 4.dp)) {
             Text(stringResource(R.string.copy), color = Oled.textPrimary, fontSize = 10.sp)
+        }
+    }
+}
+
+// A text field with one button beside it, on one line
+@Composable
+fun FieldActionRow(
+    label: String, value: String, placeholder: String, icon: ImageVector, actionDescription: String,
+    enabled: Boolean, busy: Boolean = false, onCommit: (String) -> Unit, onAction: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp)) {
+        Text(label, color = Oled.textPrimary, fontSize = 12.sp, lineHeight = 14.sp)
+        Spacer(modifier = Modifier.height(3.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            InlineField(value = value, enabled = true, placeholder = placeholder, modifier = Modifier.weight(1f), onCommit = onCommit)
+            CompactIconButton(icon, actionDescription, modifier = Modifier.alpha(if (busy) busyPulse() else if (enabled) 1f else 0.5f)) {
+                if (enabled) onAction()
+            }
+        }
+    }
+}
+
+// A choice (shown as a box, opening a menu) with one button beside it, on one line
+@Composable
+fun PickRow(
+    label: String, options: List<Pair<String, String>>, selectedId: String, enabled: Boolean,
+    actionDescription: String, actionEnabled: Boolean, actionBusy: Boolean = false, onSelect: (String) -> Unit, onAction: () -> Unit,
+) {
+    var open by remember { mutableStateOf(false) }
+    val shown = options.firstOrNull { it.first == selectedId }?.second ?: ""
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 3.dp)) {
+        Text(label, color = Oled.textPrimary, fontSize = 12.sp, lineHeight = 14.sp)
+        Spacer(modifier = Modifier.height(3.dp))
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Box(modifier = Modifier.weight(1f)) {
+                Text(
+                    shown, color = Oled.textPrimary, fontSize = 12.sp, maxLines = 1,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Oled.row, RoundedCornerShape(8.dp))
+                        .clickable(enabled = enabled) { open = true }
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                )
+                androidx.compose.material3.DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+                    options.forEach { (id, text) ->
+                        androidx.compose.material3.DropdownMenuItem(
+                            text = { Text(text) },
+                            onClick = { open = false; onSelect(id) },
+                        )
+                    }
+                }
+            }
+            CompactIconButton(Icons.Default.PlayArrow, actionDescription, modifier = Modifier.alpha(if (actionBusy) busyPulse() else if (actionEnabled) 1f else 0.5f)) {
+                if (actionEnabled) onAction()
+            }
         }
     }
 }

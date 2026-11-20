@@ -39,7 +39,6 @@ object Dimens {
 object AppTheme {
     private const val PREFS = "tvsettings"
     private const val MODE = "app_theme"
-    private const val SYSTEM_DARK = "system_dark"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 

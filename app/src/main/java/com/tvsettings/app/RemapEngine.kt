@@ -27,7 +27,25 @@ object RemapEngine {
     }
 
     // The engine runs while Home remap or the remote mouse is on
-    fun enabled(context: Context): Boolean = homeRemap(context) || mouseOn(context)
+    fun enabled(context: Context): Boolean = remapperOn(context) && (homeRemap(context) || mouseOn(context))
+
+    // Off: Stickman or another remapper owns the remote. Home then falls back to accessibility and the mouse is off.
+    fun remapperOn(context: Context): Boolean = prefs(context).getBoolean("remapper", true)
+
+    fun setRemapperOn(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("remapper", on).apply()
+        if (on && enabled(context)) restart(context) else stop()
+    }
+
+    // Stop, wait until the old remapd is really gone, then start a fresh one with the current rules
+    private fun restart(context: Context): Boolean {
+        stop()
+        for (i in 0 until 15) {
+            if (!running()) break
+            Thread.sleep(200)
+        }
+        return start(context, OverlayPrefs.homeLaunchTarget(context))
+    }
 
     // Brings the engine in line with the settings: started when wanted, stopped when nothing needs it
     fun sync(context: Context): Boolean {
@@ -36,28 +54,52 @@ object RemapEngine {
         return (up && ShizukuManager.isReady) || start(context, launch)
     }
 
-    fun running(): Boolean = Shell.exec(
-        "p=\$(cat $DIR/remapd.pid 2>/dev/null); [ -n \"\$p\" ] && grep -q remapd /proc/\$p/comm 2>/dev/null && echo yes"
-    ).output.contains("yes")
+    fun running(): Boolean = Shell.pidAlive("$DIR/remapd.pid", "remapd")
 
     // remap.conf v2 lines: "<code> <layer> <action>"
-    // Home opens the launcher the way a Home press does (HOME category), not as a LAUNCHER app
-    private fun rules(launch: String): List<String> =
-        HOME_CODES.map { "$it tap sh am start -a android.intent.action.MAIN -c android.intent.category.HOME -f 0x10200000 -n $launch" } +
-            "$MOUSE_TOGGLE_CODE double act mouse_toggle"
+    // Linux code for the remote's Recents key, from getevent -l
+    const val RECENT_CODE = 748   // 0x02ec from getevent -l
+    const val RECENTS_TARGET = "com.amazon.tv.launcher/com.amazon.tv.launcher.deeplink.activity.RecentDeepLinkActivityDI"
+
+    fun recents(context: Context): Boolean = prefs(context).getBoolean("recents", true)
+
+    fun doubleMs(context: Context): Int = prefs(context).getInt("double_ms", 250)
+    fun holdMs(context: Context): Int = prefs(context).getInt("hold_ms", 600)
+
+    // Written into the rules file; remapd picks them up when the file changes
+    fun setTiming(context: Context, doubleMs: Int, holdMs: Int) {
+        prefs(context).edit().putInt("double_ms", doubleMs).putInt("hold_ms", holdMs).apply()
+        updateRules(context, OverlayPrefs.homeLaunchTarget(context))
+    }
+
+    fun setRecents(context: Context, on: Boolean) {
+        prefs(context).edit().putBoolean("recents", on).apply()
+    }
+
+    // Home opens the launcher the way a Home press does (HOME category); Play/Pause double press toggles the mouse
+    private fun rules(context: Context, launch: String): List<String> {
+        // one tap: the custom launcher; double press: the stock (FTV) home, as the accessibility path does
+        val stock = OverlayPrefs.homeRedirectTarget(context)
+        val start = "sh am start -a android.intent.action.MAIN -c android.intent.category.HOME -f 0x10200000 -n"
+        val stockTarget = ShellText.component(stock)
+        val home = HOME_CODES.flatMap { code -> listOfNotNull("$code tap sh $DIR/home.sh", stockTarget?.let { "$code double $start $it" }) }
+        val mouse = "$MOUSE_TOGGLE_CODE double act mouse_toggle"
+        val recentRule = if (recents(context)) listOf("$RECENT_CODE tap sh am start -n $RECENTS_TARGET") else emptyList()
+        val timing = listOf("set double_ms ${doubleMs(context)}", "set hold_ms ${holdMs(context)}")
+        return timing + home + mouse + recentRule
+    }
 
     // remapd on the shell's side: the extracted native library if it exists, else copied out of the APK.
     private fun binaryPath(context: Context): String? {
         val native = context.applicationInfo.nativeLibraryDir + "/libremapd.so"
-        if (Shell.exec("[ -f '$native' ] && echo ok").output.contains("ok")) return native
+        if (Shell.fileExists(native)) return native
         val staged = context.getExternalFilesDir(null)?.resolve("remapd") ?: return null
         java.util.zip.ZipFile(context.packageCodePath).use { zip ->
             val entry = zip.getEntry("lib/armeabi-v7a/libremapd.so") ?: return null
             zip.getInputStream(entry).use { input -> staged.outputStream().use { input.copyTo(it) } }
         }
         val dest = "$DIR/remapd"
-        val copied = Shell.exec("mkdir -p $DIR && cp '${staged.path}' '$dest' && chmod 755 '$dest' && echo ok")
-        return dest.takeIf { copied.output.contains("ok") }
+        return dest.takeIf { Shell.installExecutable(staged.path, DIR, dest) }
     }
 
     // Why the last start failed, for the toast
@@ -65,7 +107,7 @@ object RemapEngine {
         private set
 
     private fun logTail(): String =
-        Shell.exec("logcat -d -s RemapD | tail -n 3").output.trim().ifEmpty { "no RemapD log lines" }
+        Shell.logTail("RemapD", 3).ifEmpty { "no RemapD log lines" }
 
     fun start(context: Context, launch: String): Boolean {
         lastError = ""
@@ -82,14 +124,15 @@ object RemapEngine {
             lastError = "remapd not found in the APK or the native library folder"
             return false
         }
-        val conf = rules(launch).joinToString(" ") { "'$it'" }
+        val conf = rules(context, launch).joinToString(" ") { "'$it'" }
         val steps = listOf(
             "mkdir -p $DIR",
             "printf '%s' '${context.packageCodePath}' > $DIR/apk",
             "printf '%s\\n' $conf > $DIR/remap.conf",
+            homeScriptWrite(launch),
             "( setsid $lib $DIR/remap.conf '$REMOTE' $DIR/remapd.pid || $lib $DIR/remap.conf '$REMOTE' $DIR/remapd.pid ) </dev/null >/dev/null 2>&1 &",
         )
-        if (!Shell.exec(steps.joinToString(" && ")).ok) {
+        if (!Shell.script(steps).ok) {
             lastError = "couldn't write to $DIR"
             return false
         }
@@ -107,15 +150,28 @@ object RemapEngine {
     // Used when the Advanced page opens: restart the engine after a reboot or a crash, if it was turned on.
     fun ensure(context: Context, launch: String) {
         up = running()
+        // a running remapd may have older rules (before a rule was added): rewrite them every time
+        if (up) Shell.script(listOf(rulesWrite(context, launch)))
         sync(context)
     }
 
-    private fun rulesWrite(launch: String): String =
-        "printf '%s\\n' ${rules(launch).joinToString(" ") { "'$it'" }} > $DIR/remap.conf"
+    // The script behind the Home tap: One Touch Play wakes the TV and switches it to this input, then the launcher opens
+    private fun homeScriptWrite(launch: String): String {
+        // a name that isn't a plain package/class writes nothing: Home keeps its last script
+        val target = ShellText.component(launch) ?: return ":"
+        return ShellText.writeFile(
+            "$DIR/home.sh",
+            "cmd hdmi_control onetouchplay >/dev/null 2>&1; am start -a android.intent.action.MAIN -c android.intent.category.HOME -f 0x10200000 -n $target",
+            executable = true,
+        )
+    }
+
+    private fun rulesWrite(context: Context, launch: String): String =
+        ShellText.writeFile("$DIR/remap.conf", rules(context, launch).joinToString("\n"))
 
     // Applies a new launch target to a running engine. remapd re-reads remap.conf when it changes.
     fun updateRules(context: Context, launch: String): Boolean =
-        active(context) && Shell.exec(rulesWrite(launch)).ok
+        active(context) && Shell.script(listOf(homeScriptWrite(launch), rulesWrite(context, launch))).ok
 
     private const val MOUSE_CMD = "$DIR/mouse.cmd"
 
@@ -125,13 +181,11 @@ object RemapEngine {
     fun setMouse(context: Context, on: Boolean): Boolean {
         prefs(context).edit().putBoolean("mouse_on", on).apply()
         val running = sync(context)
-        return running && Shell.exec("printf '%s' ${if (on) "on" else "off"} > $MOUSE_CMD").ok
+        return running && Shell.writeText(MOUSE_CMD, if (on) "on" else "off").ok
     }
 
     fun stop(): Boolean {
         up = false
-        return Shell.exec(
-            "p=\$(cat $DIR/remapd.pid 2>/dev/null); [ -n \"\$p\" ] && grep -q remapd /proc/\$p/comm 2>/dev/null && kill \$p; rm -f $DIR/remapd.pid"
-        ).ok
+        return Shell.killPid("$DIR/remapd.pid", "remapd")
     }
 }

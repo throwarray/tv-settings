@@ -11,6 +11,23 @@ object AppIcons {
     private fun icon(name: String, build: androidx.compose.ui.graphics.vector.ImageVector.Builder.() -> Unit): ImageVector =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply(build).build()
 
+    val Folder: ImageVector by lazy {
+        icon("Folder") {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(2f, 6f); lineTo(4f, 4f); lineTo(10f, 4f); lineTo(12f, 6f); lineTo(20f, 6f); lineTo(22f, 8f)
+                lineTo(22f, 18f); lineTo(20f, 20f); lineTo(4f, 20f); lineTo(2f, 18f); close()
+            }
+        }
+    }
+
+    val Bolt: ImageVector by lazy {
+        icon("Bolt") {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(12.8f, 4f); lineTo(4.8f, 13.6f); lineTo(12f, 13.6f); lineTo(11.2f, 20f); lineTo(19.2f, 10.4f); lineTo(12f, 10.4f); close()
+            }
+        }
+    }
+
     val Trash: ImageVector by lazy {
         icon("Trash") {
             path(fill = SolidColor(Color.White)) {

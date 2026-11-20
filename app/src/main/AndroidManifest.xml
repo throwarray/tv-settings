@@ -23,13 +23,28 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
         <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
         <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="market" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <data android:scheme="amzn" />
+        </intent>
+        <package android:name="com.amazon.venezia" />
+        <package android:name="com.android.vending" />
+        <package android:name="org.fdroid.fdroid" />
+        <package android:name="com.aurora.store" />
+        <package android:name="dev.imranr.obtainium" />
+    </queries>
     <application
         android:name=".TVSettingsApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="TV Settings"
         android:banner="@drawable/banner"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:roundIcon="@mipmap/ic_launcher"
         android:supportsRtl="true"
         android:theme="@style/Theme.TVSettings" android:extractNativeLibs="true">
        <activity
@@ -127,6 +142,21 @@
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/usage_widget_info" />
+        </receiver>
+        <service
+            android:name=".NowPlayingListener"
+            android:exported="true"
+            android:label="@string/np_listener_label"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
+        </service>
+        <receiver android:name=".NowPlayingWidget" android:exported="true" android:label="@string/np_widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data android:name="android.appwidget.provider" android:resource="@xml/nowplaying_widget_info" />
         </receiver>
         <receiver android:name=".InstallResultReceiver" android:exported="false" />
     </application>

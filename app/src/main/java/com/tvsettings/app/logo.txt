@@ -1,0 +1,35 @@
+> Task :app:compileReleaseKotlin
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:5 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:10 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:11 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:14 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:27 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:28 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:31 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:34 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:35 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:36 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:43 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:44 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:49 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:50 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:57 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:58 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:59 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:68 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:69 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:70 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:71 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1276:77 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1277:9 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1277:10 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1277:16 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1277:16 Function declaration must have a name.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1277:18 Unresolved reference 'it'.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1277:18 Cannot infer type for type parameter 'V'. Specify it explicitly.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1277:47 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1277:49 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1277:50 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1277:55 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1277:57 Syntax error: Expecting a top level declaration.
+e: file:///sdcard/TVSettings/app/src/main/java/com/tvsettings/app/AdvancedSettingsActivity.kt:1277:61 Syntax error: Expecting a top level declaration.

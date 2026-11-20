@@ -1,77 +1,50 @@
 package com.tvsettings.app
 
-import android.content.pm.PackageManager
 import android.accessibilityservice.AccessibilityService
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
-import android.net.NetworkRequest
-import android.accessibilityservice.GestureDescription
 import android.accessibilityservice.AccessibilityService.GestureResultCallback
+import android.accessibilityservice.GestureDescription
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
-import android.graphics.Color
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
-import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
-import android.widget.Toast
-import kotlin.math.abs
 import java.util.concurrent.Executors
 
 object OverlayPrefs {
     const val PREFS = "tvsettings"
     private const val DOT = "vpn_dot_enabled"
-    private const val BACKEND = "mouse_backend"
     private const val ENFORCER = "enforcer_enabled"
     private const val HOME_REDIRECT = "home_redirect"
     private const val HOME_TARGET = "home_redirect_target"
     private const val HOME_LAUNCH = "home_redirect_launch"
     private const val HOME_BOOT = "home_on_boot"
     private const val DEFAULT_INTERCEPT = "com.amazon.tv.launcher/com.amazon.tv.launcher.ui.HomeActivity_vNext"
-    private const val HOME_DELAY = "home_delay_ms"
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun dotEnabled(context: Context): Boolean = prefs(context).getBoolean(DOT, false)
 
-    // auto | adb | accessibility
-    fun backend(context: Context): String = prefs(context).getString(BACKEND, null) ?: "auto"
-
-    fun setBackend(context: Context, backend: String) {
-        prefs(context).edit().putString(BACKEND, backend).apply()
-    }
-
-
-
     // slow | normal | fast: how far a scroll key drags, in pixels
 
-
-
-
-
     // black-screen time between the intercepted home appearing and the redirect
-    fun homeDelayMs(context: Context): Int = prefs(context).getInt(HOME_DELAY, 1000)
-
-    fun setHomeDelayMs(context: Context, ms: Int) {
-        prefs(context).edit().putInt(HOME_DELAY, ms).apply()
-    }
+    // One delay for both: the remap double-press delay
+    fun homeDelayMs(context: Context): Int = RemapEngine.doubleMs(context)
 
     // white | yellow | cyan | green | red | magenta
-
-
-
-
 
     fun setDot(context: Context, enabled: Boolean): Boolean = set(context, DOT, enabled)
 
@@ -108,7 +81,6 @@ object OverlayPrefs {
         return ok
     }
 
-
     fun setEnforcer(context: Context, enabled: Boolean) {
         prefs(context).edit().putBoolean(ENFORCER, enabled).apply()
     }
@@ -133,7 +105,6 @@ class OverlayService : AccessibilityService() {
     private val handler = Handler(Looper.getMainLooper())
     private val io = Executors.newSingleThreadExecutor()
     private val prefsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ -> onPrefsChanged() }
-
 
     private var dot: View? = null
     private var dotParams: WindowManager.LayoutParams? = null
@@ -172,7 +143,6 @@ class OverlayService : AccessibilityService() {
         }
     }
 
-
     // Home redirect. A Home press on the stock home starts a pending redirect: black screen, then the launch app after
     // the delay. A press or a navigation during the delay keeps stock. A press on the custom launcher lets stock show.
     // A stock arrival after a recent key press also redirects. Logs and the broadcast only add a press on the stock
@@ -189,7 +159,6 @@ class OverlayService : AccessibilityService() {
     private var curPkg: String? = null
     private var broadcastOn = false
 
-
     private val homeReceiver = object : android.content.BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
             handler.post { onPress(1) }
@@ -205,6 +174,14 @@ class OverlayService : AccessibilityService() {
     }
 
     private fun stockPkg(): String? = ComponentName.unflattenFromString(OverlayPrefs.homeRedirectTarget(this))?.packageName
+    // The home screens: whatever answers the Home intent, plus the stock and custom launcher chosen in Remapping
+    private fun launcherPackages(): Set<String> = buildSet {
+        val home = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+        packageManager.queryIntentActivities(home, 0).forEach { add(it.activityInfo.packageName) }
+        add(OverlayPrefs.homeLaunchTarget(this@OverlayService).substringBefore('/'))
+        add(OverlayPrefs.homeRedirectTarget(this@OverlayService).substringBefore('/'))
+    }
+
     private fun launchPkg(): String? = ComponentName.unflattenFromString(OverlayPrefs.homeLaunchTarget(this))?.packageName
 
     private fun pendingActive(): Boolean =
@@ -256,6 +233,19 @@ class OverlayService : AccessibilityService() {
     override fun onKeyEvent(event: KeyEvent): Boolean {
         // the engine grabs the remote while it runs: these keys never reach here
         if (RemapEngine.active(this)) return false
+        if (event.keyCode == KeyEvent.KEYCODE_APP_SWITCH && RemapEngine.recents(this)) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                try {
+                    startActivity(
+                        Intent().setComponent(ComponentName.unflattenFromString(RemapEngine.RECENTS_TARGET))
+                            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    )
+                } catch (e: Exception) {
+                    toast("Recents: can't open the launcher's recent apps")
+                }
+            }
+            return true
+        }
         if (event.keyCode == KeyEvent.KEYCODE_HOME && OverlayPrefs.homeRedirectEnabled(this)) onHomeKey(event)
         return false
     }
@@ -304,9 +294,9 @@ class OverlayService : AccessibilityService() {
         if (curPkg != null && curPkg == stockPkg()) startPending()
     }
 
-
-
     private var nextEnsure = 0L
+    private var nextEnforce = 0L
+    private var nextWidget = 0L
 
     // The engine comes back after a reboot, a crash or Shizuku starting late: check every 30 s
     private val watcherTick: Runnable = Runnable {
@@ -315,9 +305,17 @@ class OverlayService : AccessibilityService() {
             val launch = OverlayPrefs.homeLaunchTarget(this)
             if (RemapEngine.enabled(this) && ShizukuManager.isReady) io.execute { RemapEngine.ensure(this, launch) }
         }
+        // the accessibility keep-alive: rewrites the setting if it was turned off, once a minute
+        if (SystemClock.uptimeMillis() >= nextEnforce) {
+            nextEnforce = SystemClock.uptimeMillis() + 60_000
+            io.execute { KeepAlive.enforce(this, false) }
+        }
+        if (SystemClock.uptimeMillis() >= nextWidget && getSystemService(android.os.PowerManager::class.java).isInteractive && UsageWidget.hasWidgets(this)) {
+            nextWidget = SystemClock.uptimeMillis() + 5_000
+            io.execute { UsageWidget.refresh(this) }
+        }
         handler.postDelayed(watcherTick, WATCHER_MS)
     }
-
 
     // Boot: the same pending redirect as a Home press.
     fun requestBootRedirect() = startPending()
@@ -327,7 +325,14 @@ class OverlayService : AccessibilityService() {
         val pkg = event.packageName?.toString()
         val cls = event.className?.toString()
         val before = curPkg
-        if (pkg != null && pkg != "com.android.systemui" && pkg != packageName) curPkg = pkg
+        // the installer, permission dialogs and file pickers take the screen for a moment: they never count as leaving an app
+        if (pkg != null && pkg !in Doze.TRANSIENT_UI && pkg != packageName) curPkg = pkg
+        // "close on exit": only when the app was left for the launcher (backing out or Home). Another app, a picker or a
+        // dialog taking the screen is not an exit, so nothing is stopped while the user is still working in it.
+        if (before != null && before != curPkg && Doze.isExit(this, before) && curPkg in launcherPackages()) {
+            val left = before
+            handler.postDelayed({ if (curPkg in launcherPackages()) io.execute { Shell.forceStop(left) } }, 1500)
+        }
         val now = SystemClock.uptimeMillis()
         val launch = launchPkg()
         // the launch app showing up means the redirect worked: drop the black screen
@@ -363,6 +368,7 @@ class OverlayService : AccessibilityService() {
     override fun onServiceConnected() {
         overlayServiceInstance = this
         registerHomeReceiver()
+        io.execute { if (ShizukuManager.isReady) Doze.migrate(this) }
         getSharedPreferences(OverlayPrefs.PREFS, Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(prefsListener)
         onPrefsChanged()
         handler.removeCallbacks(watcherTick)
@@ -377,26 +383,17 @@ class OverlayService : AccessibilityService() {
 
     // ---------------------------------------------------------------- mouse
 
-
     // Movement is driven by our own timer while a key is held, not by key-repeat events.
-
-
-
 
     // Redraws a visible cursor so a colour change shows at once
 
-
-
     // Shizuku when it's connected, otherwise an accessibility gesture
-
 
     // With Shizuku, OK sends a real DOWN and UP, so holding OK holds the press while the cursor moves.
     // Without Shizuku a press is only a tap.
     // Swipe through the cursor point: +1 scrolls down (finger moves up), -1 scrolls up. Needs Shizuku.
 
     // remapd's pointer lines, forwarded by the key injector: "P on", "P off", "P dx dy wheel button".
-
-
 
     // Full-screen black while the redirect is pending, so the stock launcher never shows.
 
@@ -405,10 +402,6 @@ class OverlayService : AccessibilityService() {
     }
 
     private fun showBlackout() = BlackActivity.show(this)
-
-
-
-
 
     // One move is queued at a time, so the cursor never falls far behind the pointer.
 
@@ -566,32 +559,17 @@ class OverlayService : AccessibilityService() {
     }
 
     companion object {
-        const val DOUBLE_PRESS_MS = 400L
         const val DOT_TICK_MS = 50L
         const val DOT_COLOR_MS = 500L
         const val DOT_DRIFT = 1.0f
         const val WATCHER_MS = 5_000L
-        const val LATE_AUTH_MS = 350L
-        const val LONG_PRESS_MS = 500L
         const val HOME_CAUSE_MS = 3_000L
         const val REDIRECT_COOLDOWN_MS = 2_500L
-        const val DOUBLE_GUARD_MS = 150L
-        const val DOUBLE_TAP_MS = 600L
-        const val SKIP_ARRIVAL_MS = 3_000L
-        const val DOUBLE_HOME_MS = 800L
-        const val REDIRECT_DELAY_MS = 1_000L
         const val LONG_SUPPRESS_MS = 1_500L
         const val DOT_CYCLE_MS = 4_000L
         val DOT_ON = 0xFF8CF3A5.toInt()
         val DOT_OFF = 0xFFFF5A5A.toInt()
         val DOT_WARN = 0xFFFFC107.toInt()
-        const val TICK_MS = 16L
-        const val BASE_STEP = 10
-        const val MAX_STEP = 56
-        const val RAMP_MS_PER_PX = 20L // +1 px per tick for every 20 ms held
-        const val MAX_HOLD_MS = 15_000L
-        val CONNECTED = 0xFF8CF3A5.toInt()
-        val DISCONNECTED = 0xFFFF5A5A.toInt()
     }
 }
 

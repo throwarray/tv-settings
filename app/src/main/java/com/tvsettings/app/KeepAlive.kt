@@ -32,7 +32,8 @@ object KeepAlive {
 
     // The service exists only to keep the accessibility setting enforced. Without that option it never runs,
     // so there is no foreground notification. The accessibility service keeps running on its own.
-    fun needed(context: Context) = enforcing(context)
+    // Off: the enforcer service never starts, so there is no foreground notification.
+    fun needed(context: Context) = false
 
     // only the accessibility features are enforced; a placed widget alone must not turn the service on
     fun enforcing(context: Context) = OverlayPrefs.wantsService(context) && OverlayPrefs.enforcerEnabled(context)

@@ -7,8 +7,8 @@ import android.content.Intent
 import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
-import android.provider.Settings
 import android.provider.OpenableColumns
+import android.provider.Settings
 
 // Installs through PackageInstaller under REQUEST_INSTALL_PACKAGES. Shizuku can grant that app-op once.
 object ApkInstaller {
@@ -64,9 +64,11 @@ class InstallResultReceiver : BroadcastReceiver() {
     }
 }
 
-// The document picker grants temporary read access to the selected APK, independent of Shizuku.
+// A file from our browser is installed through the shell (Shizuku can read all of shared storage); the document picker's
+// content Uri carries its own temporary read access and goes through a PackageInstaller session.
 fun ApkInstaller.installFromUri(context: Context, uri: Uri): Boolean = try {
-    prepareAndInstall(context, uri)
+    if (uri.scheme == "file" && ShizukuManager.isReady) Shell.installApk(uri.path.orEmpty()).ok
+    else prepareAndInstall(context, uri)
 } catch (_: Throwable) {
     false
 }

@@ -1,9 +1,9 @@
 package com.tvsettings.app
 
-import android.content.pm.ApplicationInfo
 import android.app.AppOpsManager
 import android.app.usage.StorageStatsManager
 import android.content.Context
+import android.content.pm.ApplicationInfo
 import android.os.Build
 import android.os.Process
 import android.os.storage.StorageManager
