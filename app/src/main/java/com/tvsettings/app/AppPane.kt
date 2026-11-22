@@ -1,12 +1,16 @@
 package com.tvsettings.app
 
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.PowerManager
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -18,8 +22,11 @@ import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.ShoppingCart
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -31,8 +38,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -143,6 +152,23 @@ fun AppDetailPane(
         var details by remember(app.packageName) { mutableStateOf<AppDetails?>(null) }
         var confirmPending by remember(app.packageName) { mutableStateOf<String?>(null) }
         var manifestText by remember(app.packageName) { mutableStateOf<String?>(null) }
+        var netBlocked by remember(app.packageName) { mutableStateOf(NetBlock.isBlocked(context, app.packageName)) }
+        var usageAllowed by remember { mutableStateOf(false) }
+        var usageStats by remember(app.packageName) { mutableStateOf<UsageInfo.Stats?>(null) }
+        LaunchedEffect(app.packageName) {
+            usageAllowed = onIo { UsageInfo.allowed(context) }
+            usageStats = if (usageAllowed) onIo { UsageInfo.load(context, app.packageName) } else null
+        }
+        var freezeShortcut by remember { mutableStateOf(true) }
+        val freezeExtra: @Composable () -> Unit = {
+            Row(
+                modifier = Modifier.fillMaxWidth().clickable { freezeShortcut = !freezeShortcut }.padding(top = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Checkbox(checked = freezeShortcut, onCheckedChange = { freezeShortcut = it })
+                Text(context.getString(R.string.freeze_option_label), color = Oled.textPrimary, fontSize = 12.sp)
+            }
+        }
         var killOnBoost by remember(app.packageName) { mutableStateOf(BoostList.contains(context, app.packageName)) }
         var dozeMode by remember(app.packageName) { mutableStateOf(Doze.mode(context, app.packageName)) }
         var backupPicking by remember(app.packageName) { mutableStateOf(false) }
@@ -181,7 +207,6 @@ fun AppDetailPane(
                 onDismiss = { backupPicking = false },
             )
         }
-        manifestText?.let { text -> TextDialog(context.getString(R.string.manifest), text) { manifestText = null } }
         confirmPending?.let { what ->
             val pkg = app.packageName
             val (title, text, label) = when (what) {
@@ -210,12 +235,16 @@ fun AppDetailPane(
                 title = title,
                 text = text,
                 confirmLabel = label,
+                extra = if (what == "disable") freezeExtra else null,
                 onConfirm = {
                     confirmPending = null
                     scope.launch {
                         if (what == "enable" || what == "disable") {
                             app.isEnabled = onIo { AppActionController.setAppEnabled(context, pkg, what == "enable") }
+                            if (what == "disable" && freezeShortcut && !app.isEnabled) FrozenShortcut.add(context, pkg, app.appName)
                             AppEvents.activeTick++
+                            usageTick++
+                            usageStats = if (usageAllowed) onIo { UsageInfo.load(context, app.packageName) } else null
                             context.toast("Done")
                         } else {
                             val ok = onIo { (if (what == "data") Shell.clearData(pkg) else Shell.uninstallForUser(pkg)).ok }
@@ -232,12 +261,11 @@ fun AppDetailPane(
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
 
-            item { SectionHeader(context.getString(R.string.section_actions), secActions) { paneSections["Actions"] = !secActions } }
+            item { SectionHeader(context.getString(R.string.section_actions), secActions, dot = if (app.isActive) Oled.okGreen else null, trailing = liveText) { paneSections["Actions"] = !secActions } }
             if (secActions) {
             indentedItem {
                 QuickActionRow(buildList {
-                    if (hasLaunch) add(QuickAction(context.getString(R.string.launch), Icons.Default.PlayArrow) { AppActionController.launchApp(context, app.packageName) })
-                    add(QuickAction(context.getString(R.string.app_info), Icons.Default.Info) { AppActionController.openAppInfo(context, app.packageName) })
+                    add(QuickAction(context.getString(R.string.launch), Icons.Default.PlayArrow, enabled = hasLaunch && app.isEnabled) { AppActionController.launchApp(context, app.packageName) })
                     add(QuickAction(context.getString(R.string.force_stop), AppIcons.Stop, shizukuReady) {
                         scope.launch {
                             if (AppActionController.forceStopApp(context, app.packageName)) {
@@ -248,69 +276,85 @@ fun AppDetailPane(
                             }
                         }
                     })
+                    add(QuickAction(context.getString(R.string.app_info), Icons.Default.Info) { AppActionController.openAppInfo(context, app.packageName) })
+                    add(QuickAction(context.getString(R.string.open_in_store), Icons.Default.ShoppingCart) {
+                        if (!Stores.open(context, app.packageName)) context.toast(context.getString(R.string.store_none))
+                    })
                 })
             }
             }
             item { SectionHeader(context.getString(R.string.section_details), secInfo) { paneSections["Info"] = !secInfo } }
             if (secInfo) {
             Debloat.infoFor(app.packageName)?.let { info -> indentedItem { DebloatNote(info) } }
-            indentedItem { StatRow(context.getString(R.string.version), details?.version ?: context.getString(R.string.value_loading)) }
-            indentedItem { StatRow(context.getString(R.string.installed), formatDateTime(app.firstInstallTime)) }
-            indentedItem { StatRow(context.getString(R.string.updated), formatDateTime(app.lastUpdateTime)) }
-            indentedItem { StatRow(context.getString(R.string.installed_by), details?.installer ?: context.getString(R.string.value_loading)) }
-            details?.let { d ->
-                val appBytes = d.appBytes
-                val dataBytes = d.dataBytes
-                val cacheBytes = d.cacheBytes
-                if (appBytes != null && dataBytes != null && cacheBytes != null) {
-                    indentedItem { StatRow(context.getString(R.string.total_size), formatBytes(context, appBytes + dataBytes + cacheBytes)) }
-                    indentedItem {
-                        StatRow(
-                            context.getString(R.string.app_and_data),
-                            context.getString(R.string.app_and_data_sizes, formatBytes(context, appBytes), formatBytes(context, dataBytes)),
-                        )
+            val loadingText = context.getString(R.string.value_loading)
+            val infoRows = buildList<Pair<String, String>> {
+                add(context.getString(R.string.version) to (details?.version ?: loadingText))
+                add(context.getString(R.string.installed_by) to (details?.installer ?: loadingText))
+                add(context.getString(R.string.installed) to formatDateTime(app.firstInstallTime))
+                add(context.getString(R.string.updated) to formatDateTime(app.lastUpdateTime))
+                if (usageAllowed) {
+                    add(context.getString(R.string.usage_last_used) to
+                        (usageStats?.let { if (it.lastUsed > 0) formatDateTime(it.lastUsed) else context.getString(R.string.usage_never) } ?: ""))
+                    add(context.getString(R.string.usage_stats) to
+                        (usageStats?.let { context.getString(R.string.usage_today_week, formatUsage(context, it.todayMs), formatUsage(context, it.weekMs)) } ?: ""))
+                } else {
+                    add(context.getString(R.string.usage_stats) to context.getString(R.string.usage_needs_access))
+                }
+                details?.let { d ->
+                    val appBytes = d.appBytes
+                    val dataBytes = d.dataBytes
+                    val cacheBytes = d.cacheBytes
+                    if (appBytes != null && dataBytes != null && cacheBytes != null) {
+                        add(context.getString(R.string.total_size) to formatBytes(context, appBytes + dataBytes + cacheBytes))
+                        add(context.getString(R.string.app_and_data) to
+                            context.getString(R.string.app_and_data_sizes, formatBytes(context, appBytes), formatBytes(context, dataBytes)))
+                        add(context.getString(R.string.cache_size) to formatBytes(context, cacheBytes))
                     }
-                    indentedItem { StatRow(context.getString(R.string.cache_size), formatBytes(context, cacheBytes)) }
-                } else if (d.needsUsageAccess) {
+                }
+            }
+            // the More item is the fifth row of the last group; clicking any group expands or folds the manifest
+            val toggleManifest: () -> Unit = {
+                if (manifestText != null) manifestText = null
+                else scope.launch { manifestText = onIo { AppManifest.describe(context, app.packageName) } }
+            }
+            val sizesShown = details?.let { it.appBytes != null && it.dataBytes != null && it.cacheBytes != null } == true
+            val moreRow: Pair<String, String> = Pair(context.getString(R.string.more_details), "")
+            val infoGroups: List<List<Pair<String, String>>> = (infoRows + moreRow).chunked(5)
+            infoGroups.forEach { chunk ->
+                indentedItem { StatChunk(chunk, onClick = toggleManifest) }
+            }
+            if (!sizesShown) details?.let { d ->
+                if (d.needsUsageAccess) {
                     indentedItem {
                         ActionRow(context.getString(R.string.allow_usage_access_for_sizes), Icons.Default.Info, enabled = shizukuReady) {
-                            scope.launch {
-                                onIo { Shell.appOpsSet(context.packageName, "GET_USAGE_STATS", "allow") }
-                                usageTick++
-                            }
+                            // this app's own app-op: set on the system screen (writing it here restarts the app)
+                            context.startActivity(android.content.Intent(android.provider.Settings.ACTION_USAGE_ACCESS_SETTINGS).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
                         }
                     }
                 } else {
                     indentedItem { StatRow(context.getString(R.string.size), context.getString(R.string.not_available)) }
                 }
             }
-            indentedItem { StatRow(context.getString(R.string.cpu_and_ram), liveText) }
-            indentedItem {
-                ActionRow(context.getString(R.string.view_manifest), AppIcons.Layers) {
-                    scope.launch { manifestText = onIo { AppManifest.describe(context, app.packageName) } }
-                }
+            if (app.isSystem && app.isEnabled) indentedItem {
+                Text(context.getString(R.string.disable_system_app_warning), color = Oled.textSecondary, fontSize = 10.sp,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp))
             }
+            // always shown, not inside a group
             indentedItem {
-                ActionRow(context.getString(R.string.open_in_store), AppIcons.Card) {
-                    if (!Stores.open(context, app.packageName)) context.toast(context.getString(R.string.store_none))
-                }
+                QuickActionRow(buildList {
+                    add(QuickAction(
+                        context.getString(if (app.isEnabled) R.string.disable_app_action else R.string.enable_app_action),
+                        if (app.isEnabled) Icons.Default.Lock else Icons.Default.CheckCircle,
+                        shizukuReady,
+                    ) { confirmPending = if (app.isEnabled) "disable" else "enable" })
+                    add(QuickAction(context.getString(R.string.clear_data_privileged_action), AppIcons.Trash, shizukuReady) { confirmPending = "data" })
+                    add(QuickAction(context.getString(R.string.uninstall_app_action), AppIcons.Exit, shizukuReady) { confirmPending = "uninstall" })
+                    add(QuickAction(context.getString(R.string.backup_apk), AppIcons.Backup, shizukuReady) { backupPicking = true })
+                })
             }
-            indentedItem {
-                ActionRow(
-                    context.getString(if (app.isEnabled) R.string.disable_app_action else R.string.enable_app_action),
-                    if (app.isEnabled) Icons.Default.Lock else Icons.Default.CheckCircle,
-                    enabled = shizukuReady,
-                    subtitle = if (app.isSystem && app.isEnabled) context.getString(R.string.disable_system_app_warning) else null,
-                ) { confirmPending = if (app.isEnabled) "disable" else "enable" }
-            }
-            indentedItem {
-                ActionRow(context.getString(R.string.clear_data_privileged_action), AppIcons.Trash, enabled = shizukuReady) { confirmPending = "data" }
-            }
-            indentedItem {
-                ActionRow(context.getString(R.string.uninstall_app_action), AppIcons.Exit, enabled = shizukuReady) { confirmPending = "uninstall" }
-            }
-            indentedItem {
-                ActionRow(context.getString(R.string.backup_apk), AppIcons.Backup, enabled = shizukuReady) { backupPicking = true }
+            // the expanded manifest, five lines a group so it scrolls inside the viewport
+            manifestText?.lines()?.chunked(5)?.forEach { chunk ->
+                indentedItem { TextChunk(chunk, onClick = toggleManifest) }
             }
             }
             if (app.isVpn) {
@@ -471,6 +515,17 @@ fun AppDetailPane(
             if (secPerms) {
                 indentedItem {
                     ToggleRow(
+                        context.getString(R.string.label_block_network),
+                        netBlocked,
+                        subtitle = context.getString(R.string.subtitle_block_network),
+                        enabled = shizukuReady,
+                    ) { want ->
+                        netBlocked = want
+                        scope.launch { if (!onIo { NetBlock.set(context, app.packageName, want) }) netBlocked = !want }
+                    }
+                }
+                indentedItem {
+                    ToggleRow(
                         context.getString(R.string.label_boost_kill),
                         killOnBoost,
                         subtitle = context.getString(R.string.subtitle_boost_kill),
@@ -486,6 +541,7 @@ fun AppDetailPane(
                         options = listOf(
                             Doze.NORMAL to context.getString(R.string.doze_normal),
                             Doze.EXIT to context.getString(R.string.doze_exit),
+                    Doze.RESTRICT to context.getString(R.string.doze_restrict),
                             Doze.IDLE to context.getString(R.string.doze_idle),
                         ),
                         // what the system says wins over what was saved
@@ -554,7 +610,7 @@ fun AppDetailPane(
                     }
                 })
 
-            indentedItems(app.permissions.filter { it.kind == "runtime" || it.kind == "appop" }, key = { "perm:" + it.name }) { perm ->
+            indentedItems(app.permissions.filter { it.kind == "runtime" || it.kind == "appop" || it.kind == "development" }, key = { "perm:" + it.name }) { perm ->
                 if (perm.kind == "appwidget") {
                     ToggleRow(perm.label, perm.granted, subtitle = perm.description, enabled = shizukuReady) { want ->
                         scope.launch { onIo { Shell.widgetBind(app.packageName, want) } }
@@ -564,7 +620,7 @@ fun AppDetailPane(
                 } else ToggleRow(
                     perm.label,
                     perm.granted,
-                    subtitle = perm.description,
+                    subtitle = PermissionNotes.subtitle(context, perm.name, perm.description),
                     enabled = shizukuReady && (perm.kind == "runtime" || perm.kind == "development"),
                     focusableWhenDisabled = true,
                 ) { want ->
@@ -607,13 +663,18 @@ fun AppDetailPane(
                                 bound = want
                                 scope.launch { if (!onIo { Shell.widgetBind(app.packageName, want).ok }) bound = !want }
                             }
-                        } else ToggleRow(
-                            label = perm.label,
-                            checked = perm.granted,
-                            subtitle = perm.description,
-                            enabled = false,
-                            focusableWhenDisabled = true,
-                        ) { }
+                        } else {
+                            // signature permissions are kept here, but still settable: which ones take effect isn't known up front
+                            var granted by remember(app.packageName, perm.name) { mutableStateOf(perm.granted) }
+                            ToggleRow(
+                                perm.label, granted,
+                                subtitle = PermissionNotes.subtitle(context, perm.name, perm.description),
+                                enabled = shizukuReady && !PermissionNotes.fixed(perm.name),
+                            ) { want ->
+                                granted = want
+                                scope.launch { if (!onIo { AppInspector.setPermission(app.packageName, perm.name, want) }) granted = !want }
+                            }
+                        }
                     }
                 }
             }
@@ -675,3 +736,7 @@ fun AppDetailPane(
         }
     }
 }
+
+// "2h 05m" for a duration in milliseconds
+private fun formatUsage(context: Context, ms: Long): String =
+    context.getString(R.string.usage_duration, ms / 3_600_000L, (ms / 60_000L) % 60)

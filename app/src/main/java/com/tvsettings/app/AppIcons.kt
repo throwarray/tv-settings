@@ -11,6 +11,34 @@ object AppIcons {
     private fun icon(name: String, build: androidx.compose.ui.graphics.vector.ImageVector.Builder.() -> Unit): ImageVector =
         ImageVector.Builder(name, 24.dp, 24.dp, 24f, 24f).apply(build).build()
 
+    val Network: ImageVector by lazy {
+        icon("Network") {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(3f, 16f); lineTo(6f, 16f); lineTo(6f, 21f); lineTo(3f, 21f); close()
+                moveTo(9f, 12f); lineTo(12f, 12f); lineTo(12f, 21f); lineTo(9f, 21f); close()
+                moveTo(15f, 8f); lineTo(18f, 8f); lineTo(18f, 21f); lineTo(15f, 21f); close()
+            }
+        }
+    }
+
+    val Vpn: ImageVector by lazy {
+        icon("Vpn") {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(3f, 9f); lineTo(7f, 5f); lineTo(11f, 9f); lineTo(7f, 13f); close()
+                moveTo(11f, 9f); lineTo(22f, 9f); lineTo(22f, 11f); lineTo(19f, 11f); lineTo(19f, 14f); lineTo(17f, 14f); lineTo(17f, 11f); lineTo(11f, 11f); close()
+            }
+        }
+    }
+
+    val Bluetooth: ImageVector by lazy {
+        icon("Bluetooth") {
+            path(fill = SolidColor(Color.White)) {
+                moveTo(6f, 8f); lineTo(11f, 3f); lineTo(11f, 10f); lineTo(14f, 7f); lineTo(17f, 10f); lineTo(13f, 14f); lineTo(17f, 18f)
+                lineTo(14f, 21f); lineTo(11f, 18f); lineTo(11f, 21f); lineTo(6f, 16f); lineTo(9.5f, 12.5f); lineTo(6f, 9f); close()
+            }
+        }
+    }
+
     val Folder: ImageVector by lazy {
         icon("Folder") {
             path(fill = SolidColor(Color.White)) {

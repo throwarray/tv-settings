@@ -31,6 +31,12 @@ object UsageWidget {
         val views = RemoteViews(context.packageName, R.layout.widget_usage)
         views.setTextViewText(R.id.widget_cpu, cpuText)
         views.setTextViewText(R.id.widget_ram, ramText)
+        val open = android.app.PendingIntent.getActivity(
+            context, 0,
+            android.content.Intent(context, MainActivity::class.java).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK),
+            android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE,
+        )
+        views.setOnClickPendingIntent(R.id.widget_cpu, open)
         AppWidgetManager.getInstance(context).updateAppWidget(ids, views)
     }
 

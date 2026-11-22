@@ -61,7 +61,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     private var themeSeen = ""
@@ -97,42 +96,15 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun TVSettingsScreen() {
     val activity = LocalContext.current as Activity
-    val boostScope = rememberCoroutineScope()
     var boosting by remember { mutableStateOf(false) }
     // Trims memory in the apps behind the screen: they release what they don't need, nothing is killed.
     // The launcher pair and this app are left alone.
     fun boostApps() {
         boosting = true
-        boostScope.launch {
-            val self = activity.packageName
-            val keep = setOf(
-                self,
-                OverlayPrefs.homeLaunchTarget(activity).substringBefore('/'),
-                OverlayPrefs.homeRedirectTarget(activity).substringBefore('/'),
-            )
-            val targets = UsageFeed.snapshot?.perPackage?.keys.orEmpty().filter { it !in keep }
-            val listed = BoostList.packages(activity)
-            // the baseline comes first: everything below is what it measures
-            val before = onIo { memAvailableKb() }
-            if (before == 0L) activity.toast(activity.getString(R.string.memory_unreadable))
-            if (targets.isNotEmpty()) onIo { Shell.batch(targets.map { Shell.Cmd.trimMemory(it) }) }
-            onIo { Shell.batch(BoostList.killCommands(listed - self, targets)) }
-            val caches = if (Caches.clearOnBoost(activity)) onIo { Caches.clear(activity) } else null
-            delay(3000)   // the freed memory shows a little after the trim
-            val after = onIo { memAvailableKb() }
-            val freedMb = ((after - before).coerceAtLeast(0L)) / 1024
-            AppEvents.activeTick++
+        Booster.run(activity) { message ->
             boosting = false
-            activity.toast(
-                activity.getString(R.string.boost_done, targets.size, listed.size, freedMb.toInt()) +
-                    " (${before / 1024} to ${after / 1024} MB available)" +
-                    (caches?.let { " " + activity.getString(R.string.boost_cache, (it.beforeMb - it.afterMb).coerceAtLeast(0L).toInt()) } ?: "")
-            )
-            // this app, when it is on the list, goes last: stopping it ends this very process
-            if (self in listed) {
-                delay(1500)
-                onIo { Shell.forceStop(self) }
-            }
+            activity.toast(message)
+            AppEvents.activeTick++
         }
     }
     val apps = remember { mutableStateListOf<AppRecord>() }
@@ -289,13 +261,6 @@ fun TVSettingsScreen() {
         loading = false
     }
 
-    // self-grant WRITE_SECURE_SETTINGS once connected
-    LaunchedEffect(shizukuState) {
-        if (shizukuState == ShizukuManager.State.READY) {
-            onIo { ShizukuManager.grantWriteSecureSettings() }
-        }
-    }
-
     // running apps; other apps' processes are only visible via Shizuku
     // Running = the usage sampler's process list (full package names from /proc), plus ps for anything it missed
     LaunchedEffect(AppEvents.activeTick, AppEvents.reloadTick, shizukuState, loading, UsageFeed.snapshot) {
@@ -321,12 +286,19 @@ fun TVSettingsScreen() {
     ) {
         // Header
         Row(modifier = Modifier.widthIn(max = Dimens.contentMaxWidth).fillMaxWidth(), verticalAlignment = Alignment.Top) {
-            Column(modifier = Modifier.weight(1f).padding(start = 8.dp)) {
-                Text(
-                    stringResource(R.string.app_name), color = Oled.textPrimary, fontSize = 18.sp, lineHeight = 20.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(stringResource(R.string.app_controls), color = Oled.textSecondary, fontSize = 10.sp, lineHeight = 12.sp)
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.Top,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Column {
+                    Text(
+                        stringResource(R.string.app_name), color = Oled.textPrimary, fontSize = 18.sp, lineHeight = 20.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(stringResource(R.string.app_controls), color = Oled.textSecondary, fontSize = 10.sp, lineHeight = 12.sp)
+                }
+                StatusBar(activity)
             }
             Spacer(modifier = Modifier.width(14.dp))
             Row(modifier = Modifier.weight(1f), verticalAlignment = Alignment.Top) {

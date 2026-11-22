@@ -42,6 +42,29 @@ object Shell {
         fun idleWhitelist(pkg: String, add: Boolean) = if (Shell.safe(pkg)) "cmd deviceidle whitelist ${if (add) "+" else "-"}$pkg" else NOOP
         fun clearCache(pkg: String) = if (Shell.safe(pkg)) "pm clear --cache-only $pkg" else NOOP
         fun clearExternalCache(pkg: String) = if (Shell.safe(pkg)) "rm -rf /sdcard/Android/data/$pkg/cache/*" else NOOP
+        /** The reference's firewall: its own OUTPUT chain, set up once (iptables and ip6tables) */
+        fun iptablesSetup() = "for t in iptables ip6tables; do \$t -N tvsettings_block 2>/dev/null; \$t -C OUTPUT -j tvsettings_block 2>/dev/null || \$t -I OUTPUT -j tvsettings_block; done"
+
+        /** One uid's traffic dropped, or allowed again */
+        fun iptablesRule(uid: Int, blocked: Boolean): String {
+            val rule = "-m owner --uid-owner $uid -j DROP"
+            return if (blocked)
+                "for t in iptables ip6tables; do \$t -D tvsettings_block $rule 2>/dev/null; \$t -A tvsettings_block $rule; done"
+            else
+                "for t in iptables ip6tables; do \$t -D tvsettings_block $rule 2>/dev/null; done; true"
+        }
+
+        /** Earlier Android (and the fallback): netpolicy's background restriction for a uid. Foreground traffic is not affected. */
+        fun netRestrict(uid: Int, on: Boolean) = "cmd netpolicy ${if (on) "add" else "remove"} restrict-background-blacklist $uid"
+
+        /** Android 13+: the connectivity firewall's third chain, which package networking uses */
+        fun chain3(on: Boolean) = "cmd connectivity set-chain3-enabled $on"
+
+        /** Android 13+: all networking of one package */
+        fun packageNetworking(pkg: String, enabled: Boolean) =
+            if (Shell.safe(pkg)) "cmd connectivity set-package-networking-enabled $enabled $pkg" else NOOP
+
+        /** Background data for a uid: netpolicy's background restriction (foreground traffic is not affected) */
         fun suspend(pkg: String, on: Boolean) = if (Shell.safe(pkg)) "pm ${if (on) "suspend" else "unsuspend"} --user 0 $pkg" else NOOP
         fun setEnabled(pkg: String, enabled: Boolean) =
             if (!Shell.safe(pkg)) NOOP else if (enabled) "pm enable $pkg" else "pm disable-user --user 0 $pkg"

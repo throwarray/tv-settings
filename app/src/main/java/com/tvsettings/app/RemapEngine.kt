@@ -38,7 +38,10 @@ object RemapEngine {
     }
 
     // Stop, wait until the old remapd is really gone, then start a fresh one with the current rules
-    private fun restart(context: Context): Boolean {
+    // After an update the binary and its files are new: a running engine is started again
+    fun restartIfEnabled(context: Context): Boolean = enabled(context) && ShizukuManager.isReady && restart(context)
+
+    fun restart(context: Context): Boolean {
         stop()
         for (i in 0 until 15) {
             if (!running()) break
@@ -83,9 +86,19 @@ object RemapEngine {
         val start = "sh am start -a android.intent.action.MAIN -c android.intent.category.HOME -f 0x10200000 -n"
         val stockTarget = ShellText.component(stock)
         val home = HOME_CODES.flatMap { code -> listOfNotNull("$code tap sh $DIR/home.sh", stockTarget?.let { "$code double $start $it" }) }
-        val mouse = "$MOUSE_TOGGLE_CODE double act mouse_toggle"
+        // Play/Pause's double press toggles the remap pointer only when the remap pointer is the backend;
+        // otherwise the key passes through to the accessibility cursor
+        val mouse = if (MouseBackend.resolve(context) == MouseBackend.REMAP) {
+            listOf("$MOUSE_TOGGLE_CODE double act mouse_toggle")
+        } else {
+            emptyList()
+        }
         val recentRule = if (recents(context)) listOf("$RECENT_CODE tap sh am start -n $RECENTS_TARGET") else emptyList()
-        val timing = listOf("set double_ms ${doubleMs(context)}", "set hold_ms ${holdMs(context)}")
+        val timing = listOf(
+            "set double_ms ${doubleMs(context)}",
+            "set hold_ms ${holdMs(context)}",
+            "set mouse_speed ${OverlayPrefs.speedPercent(context)}",
+        )
         return timing + home + mouse + recentRule
     }
 
@@ -161,7 +174,7 @@ object RemapEngine {
         val target = ShellText.component(launch) ?: return ":"
         return ShellText.writeFile(
             "$DIR/home.sh",
-            "cmd hdmi_control onetouchplay >/dev/null 2>&1; am start -a android.intent.action.MAIN -c android.intent.category.HOME -f 0x10200000 -n $target",
+            "input keyevent KEYCODE_WAKEUP >/dev/null 2>&1; cmd hdmi_control onetouchplay >/dev/null 2>&1; am start -a android.intent.action.MAIN -c android.intent.category.HOME -f 0x10200000 -n $target",
             executable = true,
         )
     }
@@ -182,6 +195,12 @@ object RemapEngine {
         prefs(context).edit().putBoolean("mouse_on", on).apply()
         val running = sync(context)
         return running && Shell.writeText(MOUSE_CMD, if (on) "on" else "off").ok
+    }
+
+    // Clears the remap mouse's flag without starting or stopping anything
+    fun clearMouse(context: Context) {
+        prefs(context).edit().putBoolean("mouse_on", false).apply()
+        if (running()) Shell.writeText(MOUSE_CMD, "off")
     }
 
     fun stop(): Boolean {

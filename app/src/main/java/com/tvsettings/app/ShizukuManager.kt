@@ -23,7 +23,6 @@ object ShizukuManager {
     private const val SHIZUKU_PACKAGE = "moe.shizuku.privileged.api"
     private const val EXIT_MARKER = "__EXIT_CODE__:"
     private const val PREFS = "tvsettings"
-    private const val KEY_SECURE_OPT_OUT = "secure_settings_opt_out"
     private const val KEY_AUTHORIZED = "shizuku_authorized"
 
     val state = mutableStateOf(State.NOT_RUNNING)
@@ -34,7 +33,6 @@ object ShizukuManager {
     private var appContext: Context? = null
     private var initialized = false
     private var wantPermission = false
-    private var selfGranted = false
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private val binderReceived = Shizuku.OnBinderReceivedListener {
@@ -44,7 +42,6 @@ object ShizukuManager {
 
     private val binderDead = Shizuku.OnBinderDeadListener {
         ElevatedShellManager.reset()
-        selfGranted = false
         refresh()
     }
 
@@ -167,25 +164,11 @@ object ShizukuManager {
         ShellResult(-1, e.message ?: "Shizuku not connected")
     }
 
-    /** Once per session; skipped if the user turned it off in Advanced. */
-    fun grantWriteSecureSettings(): Boolean {
-        val context = appContext ?: return false
-        if (context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_SECURE_OPT_OUT, false)) return false
-        if (selfGranted) return true
-        selfGranted = exec("pm grant ${context.packageName} android.permission.WRITE_SECURE_SETTINGS").ok
-        return selfGranted
-    }
-
-    /** Manual; revoking also stops the auto-grant. */
+    /** Manual, from Advanced only: Android restarts this app when the grant changes. Nothing grants it automatically. */
     fun setWriteSecureSettings(grant: Boolean): Boolean {
         val context = appContext ?: return false
         val verb = if (grant) "grant" else "revoke"
-        val ok = exec("pm $verb ${context.packageName} android.permission.WRITE_SECURE_SETTINGS").ok
-        if (ok) {
-            selfGranted = grant
-            context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_SECURE_OPT_OUT, !grant).apply()
-        }
-        return ok
+        return exec("pm $verb ${context.packageName} android.permission.WRITE_SECURE_SETTINGS").ok
     }
 
     private fun toast(message: String) {

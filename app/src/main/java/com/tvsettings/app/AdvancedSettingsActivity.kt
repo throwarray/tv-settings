@@ -28,16 +28,20 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.LocationOn
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Card
@@ -58,6 +62,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -222,7 +227,9 @@ fun AdvancedSettingsScreen() {
     var holdMsSel by remember { mutableStateOf(RemapEngine.holdMs(context)) }
     var remapperOnSel by remember { mutableStateOf(RemapEngine.remapperOn(context)) }
     var remapUp by remember { mutableStateOf(false) }
-    var remoteMouse by remember { mutableStateOf(false) }
+    var mouseOn by remember { mutableStateOf(false) }
+    var mouseBackendSel by remember { mutableStateOf(MouseBackend.AUTO) }
+    var mouseSpeedSel by remember { mutableStateOf("medium") }
     var secRemoteMouse by rememberSaveable { mutableStateOf(false) }
     var diagOpen by rememberSaveable { mutableStateOf(false) }
     var confirmCaches by remember { mutableStateOf(false) }
@@ -236,15 +243,38 @@ fun AdvancedSettingsScreen() {
     var privacyRaw by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
     var privacyOn by remember { mutableStateOf<Map<String, Boolean>>(emptyMap()) }
     var screenOff by remember { mutableStateOf("") }
+    var customTimeout by remember { mutableStateOf(false) }
     var sleepTimeout by remember { mutableStateOf("") }
+    var adbOnBoot by remember { mutableStateOf(false) }
+    var wirelessOnBoot by remember { mutableStateOf(false) }
+    var bootOn by remember { mutableStateOf(false) }
+    var bootLaunch by remember { mutableStateOf("") }
+    var secBoot by rememberSaveable { mutableStateOf(false) }
+    var secRecommended by remember { mutableStateOf(false) }
+    var boostBusy by remember { mutableStateOf(false) }
+
+    // a recommended app's page is resolved to its newest APK first; a custom link or code is used as it is
+    fun startDownload() {
+        scope.launch {
+            val pkg = listOf("org.fdroid.fdroid", "com.aurora.store", "dev.imranr.obtainium").firstOrNull { apkUrl == ApkDownloads.recommendedPage(it) }
+            val link = if (pkg != null) onIo { ApkDownloads.recommendedApk(pkg) } else ApkDownloads.resolve(apkUrl)
+            if (link == null) {
+                context.toast(context.getString(R.string.recommended_fallback))
+                runCatching {
+                    context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(ApkDownloads.recommendedPage(pkg ?: "org.fdroid.fdroid"))).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+                return@launch
+            }
+            lastDownload = ApkDownloads.start(context, link, dlFolder, dlName.ifEmpty { ApkDownloads.defaultName(link) })
+            context.toast(context.getString(R.string.download_started))
+        }
+    }
     var screensaverLabel by remember { mutableStateOf("") }
     var secSleep by rememberSaveable { mutableStateOf(false) }
     var screenDim by remember { mutableStateOf(false) }
     var ambientTo by remember { mutableStateOf("") }
     var ambientOn by remember { mutableStateOf(false) }
-    val timeoutOptions =
-        if (screenOff.isEmpty() || TIMEOUT_PRESETS.any { it.first == screenOff }) TIMEOUT_PRESETS
-        else TIMEOUT_PRESETS + (screenOff to "Custom ($screenOff ms)")
+    val showCustom = customTimeout || (screenOff.isNotEmpty() && TIMEOUT_PRESETS.none { it.first == screenOff })
     val latFocus = remember { FocusRequester() }
     val customFocus = remember { FocusRequester() }
     val ambientFocus = remember { FocusRequester() }
@@ -258,6 +288,10 @@ fun AdvancedSettingsScreen() {
         ActivityList.load(context, pkg).map { android.content.ComponentName(pkg, it.className).flattenToString() to it.label }
     }
     val launchApps = remember { ActivityList.appChoices(context) }
+    val bootActs = remember(bootLaunch) {
+        val pkg = bootLaunch.substringBefore('/')
+        ActivityList.load(context, pkg).map { android.content.ComponentName(pkg, it.className).flattenToString() to it.label }
+    }
     var nightMode by remember { mutableStateOf("system") }
     var appTheme by remember { mutableStateOf(AppTheme.mode(context)) }
     var locationMode by remember { mutableIntStateOf(0) }
@@ -318,9 +352,16 @@ fun AdvancedSettingsScreen() {
             }.toMap()
         }
         screenOff = onIo { KeySettings.read(context, "screen_off_timeout") } ?: ""
-        sleepTimeout = onIo { KeySettings.read(context, "sleep_timeout") } ?: ""
         screensaverLabel = onIo { currentScreensaver(context) }
         screenDim = onIo { KeySettings.isOn(context, "screen_dimming") }
+        sleepTimeout = onIo { KeySettings.read(context, "sleep_timeout") } ?: ""
+        mouseOn = MouseBackend.enabled(context)
+        mouseBackendSel = OverlayPrefs.backend(context)
+        mouseSpeedSel = OverlayPrefs.speed(context)
+        adbOnBoot = BootFlags.get(context, "adb_on_boot")
+        wirelessOnBoot = BootFlags.get(context, "wireless_on_boot")
+        bootOn = BootFlags.get(context, "launch_on")
+        bootLaunch = BootFlags.launchTarget(context)
         ambientTo = onIo { KeySettings.read(context, "ambient_inactivity_to") } ?: ""
         ambientOn = onIo { KeySettings.isOn(context, "ambient_experience_enabled") }
         homeDelay = OverlayPrefs.homeDelayMs(context).toString()
@@ -328,7 +369,6 @@ fun AdvancedSettingsScreen() {
         recentsOn = RemapEngine.recents(context)
         if (shizukuReady) onIo { RemapEngine.ensure(context, OverlayPrefs.homeLaunchTarget(context)) }
         remapUp = RemapEngine.active(context)
-        remoteMouse = RemapEngine.mouseOn(context)
         nightMode = AppTheme.systemNight(context)
         appTheme = AppTheme.mode(context)
         locationMode = onIo { SystemSettings.locationMode(context) }
@@ -380,8 +420,10 @@ fun AdvancedSettingsScreen() {
                 colors = CardDefaults.cardColors(containerColor = Oled.card),
                 shape = RoundedCornerShape(14.dp)
             ) {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize().padding(8.dp),
+                // a plain scrolling column, not a lazy list: sections open and close here, and a lazy list
+                // re-measures its items while they are being removed
+                Column(
+                    modifier = Modifier.fillMaxSize().padding(8.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
                     item { SectionHeader(context.getString(R.string.section_status), secStatus) { secStatus = !secStatus } }
@@ -451,6 +493,17 @@ fun AdvancedSettingsScreen() {
                             )
                         )
                         indentedItem {
+                            ToggleRow(
+                                context.getString(R.string.label_cache_on_boost),
+                                cacheOnBoost,
+                                subtitle = context.getString(R.string.subtitle_cache_on_boost),
+                                enabled = shizukuReady,
+                            ) { want ->
+                                cacheOnBoost = want
+                                Caches.setClearOnBoost(context, want)
+                            }
+                        }
+                        indentedItem {
                             ActionRow(context.getString(R.string.advanced_clear_caches), AppIcons.Layers, enabled = shizukuReady, busy = clearing,
                                 subtitle = cacheMb?.let { context.getString(R.string.clear_caches_size, it.toInt()) } ?: context.getString(R.string.clear_caches_subtitle)) { confirmCaches = true }
                             if (confirmCaches) {
@@ -477,14 +530,12 @@ fun AdvancedSettingsScreen() {
                             }
                         }
                         indentedItem {
-                            ToggleRow(
-                                context.getString(R.string.label_cache_on_boost),
-                                cacheOnBoost,
-                                subtitle = context.getString(R.string.subtitle_cache_on_boost),
-                                enabled = shizukuReady,
-                            ) { want ->
-                                cacheOnBoost = want
-                                Caches.setClearOnBoost(context, want)
+                            ActionRow(context.getString(R.string.boost_action), AppIcons.Bolt, busy = boostBusy) {
+                                boostBusy = true
+                                Booster.run(context) { message ->
+                                    boostBusy = false
+                                    context.toast(message)
+                                }
                             }
                         }
                     }
@@ -510,6 +561,14 @@ fun AdvancedSettingsScreen() {
                             if (macSupported) ToggleSpec("mac_randomization", R.string.advanced_mac_randomization, macRandomization, enabled = canChange) { want ->
                                 change(context.getString(R.string.label_mac_randomization)) { SystemSettings.setMacRandomization(context, want) }
                             } else null,
+                            ToggleSpec("adb_on_boot", R.string.label_adb_on_boot, adbOnBoot, subtitleRes = R.string.subtitle_adb_on_boot, enabled = canChange) { want ->
+                                adbOnBoot = want
+                                BootFlags.set(context, "adb_on_boot", want)
+                            },
+                            ToggleSpec("wireless_on_boot", R.string.label_wireless_on_boot, wirelessOnBoot, subtitleRes = R.string.subtitle_wireless_on_boot, enabled = canChange) { want ->
+                                wirelessOnBoot = want
+                                BootFlags.set(context, "wireless_on_boot", want)
+                            },
                             ToggleSpec("adb_debugging", R.string.advanced_adb_debugging, adbDebugging, enabled = canChange) { want ->
                                 change(context.getString(R.string.label_adb_debugging)) { SystemSettings.setAdbDebugging(context, want) }
                             },
@@ -715,22 +774,39 @@ fun AdvancedSettingsScreen() {
                     indentedItem {
                         DropdownRow(
                             label = context.getString(R.string.advanced_screen_off_timeout),
-                            focusDown = customFocus,
-                            options = timeoutOptions,
-                            selectedId = screenOff,
+                            focusDown = if (showCustom) customFocus else null,
+                            options = TIMEOUT_PRESETS + ("custom" to context.getString(R.string.timeout_custom)),
+                            selectedId = if (showCustom) "custom" else screenOff,
                             subtitle = context.getString(R.string.timeout_presets_subtitle),
                             enabled = canChange,
                         ) { id ->
-                            screenOff = id
-                            if (ambientTo.isNotEmpty()) ambientTo = id
-                            change("screen off timeout") { KeySettings.writeTimeout(context, id) }
+                            customTimeout = id == "custom"
+                            if (id != "custom") {
+                                screenOff = id
+                                if (ambientTo.isNotEmpty()) ambientTo = id
+                                change("screen off timeout") { KeySettings.writeTimeout(context, id) }
+                            }
+                        }
+                    }
+                    if (showCustom) indentedItem {
+                        TextFieldRow(
+                            context.getString(R.string.advanced_custom_timeout), screenOff, enabled = canChange, focusRequester = customFocus, focusDown = ambientFocus,
+                            subtitle = context.getString(R.string.screen_timeout_subtitle),
+                        ) { text ->
+                            val ms = text.trim().toLongOrNull()
+                            if (ms == null || ms < 1_000) {
+                                context.toast("Enter milliseconds, at least 1000")
+                            } else {
+                                screenOff = ms.toString()
+                                if (ambientTo.isNotEmpty()) ambientTo = ms.toString()
+                                change("screen off timeout") { KeySettings.writeTimeout(context, ms.toString()) }
+                            }
                         }
                     }
                     indentedItem {
                         DropdownRow(
                             label = context.getString(R.string.advanced_sleep_timeout),
-                            options = if (sleepTimeout.isEmpty() || TIMEOUT_PRESETS.any { it.first == sleepTimeout }) TIMEOUT_PRESETS
-                            else TIMEOUT_PRESETS + (sleepTimeout to "Custom ($sleepTimeout ms)"),
+                            options = TIMEOUT_PRESETS,
                             selectedId = sleepTimeout,
                             subtitle = context.getString(R.string.sleep_timeout_subtitle),
                             enabled = canChange,
@@ -747,21 +823,6 @@ fun AdvancedSettingsScreen() {
                         screenDim = want
                         change("screen dimming") { KeySettings.write(context, "screen_dimming", if (want) "1" else "0") }
                     }))
-                    indentedItem {
-                        TextFieldRow(
-                            context.getString(R.string.advanced_custom_timeout), screenOff, enabled = canChange, focusRequester = customFocus, focusDown = ambientFocus,
-                            subtitle = context.getString(R.string.screen_timeout_subtitle),
-                        ) { text ->
-                            val ms = text.trim().toLongOrNull()
-                            if (ms == null || ms < 1_000) {
-                                context.toast("Enter milliseconds, at least 1000")
-                            } else {
-                                screenOff = ms.toString()
-                                if (ambientTo.isNotEmpty()) ambientTo = ms.toString()
-                                change("screen off timeout") { KeySettings.writeTimeout(context, ms.toString()) }
-                            }
-                        }
-                    }
                     indentedItem {
                         TextFieldRow(
                             context.getString(R.string.advanced_ambient_timeout), ambientTo, enabled = canChange, focusRequester = ambientFocus,
@@ -810,7 +871,7 @@ fun AdvancedSettingsScreen() {
                     indentedItem {
                         DropdownRow(
                             label = context.getString(R.string.advanced_location_method),
-                            focusDown = latFocus,
+                            focusDown = if (mockOn) latFocus else null,
                             options = listOfNotNull(if (!mockOn || locationMode == 0) "0" to context.getString(R.string.option_off) else null, "1" to "GPS only", "2" to "Wi-Fi and network", "3" to "High accuracy"),
                             selectedId = locationMode.toString(),
                             subtitle = context.getString(R.string.location_method_subtitle),
@@ -859,6 +920,53 @@ fun AdvancedSettingsScreen() {
                     if (secHomeRedirect) {
                     indentedItem {
                         ToggleRow(
+                            context.getString(R.string.remote_mouse),
+                            mouseOn,
+                            subtitle = context.getString(R.string.remote_mouse_subtitle),
+                        ) { want ->
+                            scope.launch {
+                                val ok = onIo { MouseBackend.setEnabled(context, want) }
+                                if (ok) mouseOn = want else context.toast(MouseBackend.lastError)
+                            }
+                        }
+                    }
+                    indentedItem {
+                        DropdownRow(
+                            label = context.getString(R.string.label_mouse_backend),
+                            options = listOf(
+                                MouseBackend.AUTO to context.getString(R.string.backend_auto),
+                                MouseBackend.REMAP to context.getString(R.string.backend_remap),
+                                MouseBackend.ACCESSIBILITY to context.getString(R.string.backend_accessibility),
+                            ),
+                            selectedId = mouseBackendSel,
+                            subtitle = context.getString(R.string.subtitle_mouse_backend),
+                        ) { id ->
+                            mouseBackendSel = id
+                            scope.launch {
+                                val ok = onIo { MouseBackend.changeBackend(context, id) }
+                                if (!ok) context.toast(MouseBackend.lastError)
+                                mouseOn = MouseBackend.enabled(context)
+                            }
+                        }
+                    }
+                    indentedItem {
+                        DropdownRow(
+                            label = context.getString(R.string.label_mouse_speed),
+                            options = listOf(
+                                "slow" to context.getString(R.string.speed_slow),
+                                "medium" to context.getString(R.string.speed_medium),
+                                "fast" to context.getString(R.string.speed_fast),
+                                "faster" to context.getString(R.string.speed_faster),
+                            ),
+                            selectedId = mouseSpeedSel,
+                            subtitle = context.getString(R.string.subtitle_mouse_speed),
+                        ) { id ->
+                            mouseSpeedSel = id
+                            scope.launch { onIo { MouseBackend.setSpeed(context, id) } }
+                        }
+                    }
+                    indentedItem {
+                        ToggleRow(
                             context.getString(R.string.label_builtin_remapper),
                             remapperOnSel,
                             subtitle = context.getString(R.string.subtitle_builtin_remapper),
@@ -890,18 +998,6 @@ fun AdvancedSettingsScreen() {
                             scope.launch { onIo { RemapEngine.setTiming(context, RemapEngine.doubleMs(context), holdMsSel) } }
                         }
                     }
-indentedToggleItems(
-                        listOf(
-                            ToggleSpec(
-                                "remote_mouse", R.string.remote_mouse, remoteMouse,
-                                subtitleRes = R.string.remote_mouse_subtitle,
-                                enabled = shizukuReady && remapperOnSel,
-                            ) { want ->
-                                remoteMouse = want
-                                scope.launch { onIo { RemapEngine.setMouse(context, want) } }
-                            },
-                        )
-                    )
                     indentedItem {
                         ToggleRow(
                             context.getString(R.string.label_home_remap),
@@ -925,14 +1021,6 @@ indentedToggleItems(
                                 subtitle = context.getString(R.string.home_redirect_subtitle, homeIntercept.ifEmpty { "nothing" }, homeLaunch.ifEmpty { "nothing" }),
                                 enabled = canChange,
                             ) { want -> change("home redirect") { OverlayPrefs.setHomeRedirect(context, want, homeIntercept, homeLaunch) } },
-                            ToggleSpec(
-                                "redirect_home_on_boot", R.string.advanced_redirect_home_on_boot, homeBoot,
-                                subtitleRes = R.string.redirect_home_on_boot_subtitle,
-                                enabled = canChange,
-                            ) { want ->
-                                homeBoot = want
-                                change("boot redirect") { OverlayPrefs.setHomeOnBoot(context, want) }
-                            },
                         )
                     )
                     indentedItem {
@@ -1008,11 +1096,64 @@ indentedToggleItems(
                         }
                     }
                     }
+                    item { SectionHeader(context.getString(R.string.section_boot_launch), secBoot) { secBoot = !secBoot } }
+                    if (secBoot) {
+                        indentedToggleItems(listOf(
+                            ToggleSpec(
+                                    "redirect_home_on_boot", R.string.advanced_redirect_home_on_boot, homeBoot,
+                                    subtitleRes = R.string.redirect_home_on_boot_subtitle,
+                                    enabled = canChange && !bootOn,
+                                ) { want ->
+                                    homeBoot = want
+                                    if (want && bootOn) {
+                                        bootOn = false
+                                        BootFlags.set(context, "launch_on", false)
+                                    }
+                                    change("boot redirect") { OverlayPrefs.setHomeOnBoot(context, want) }
+                                }
+                        ))
+                        indentedToggleItems(listOf(ToggleSpec(
+                            "launch_on_boot", R.string.label_launch_on_boot, bootOn,
+                            subtitleRes = R.string.subtitle_launch_on_boot,
+                            enabled = canChange && !homeBoot,
+                        ) { want ->
+                            bootOn = want
+                            if (want && homeBoot) {
+                                homeBoot = false
+                                OverlayPrefs.setHomeOnBoot(context, false)
+                            }
+                            BootFlags.set(context, "launch_on", want)
+                        }))
+                        indentedItem {
+                            DropdownRow(
+                                label = context.getString(R.string.label_boot_app),
+                                options = launchApps,
+                                selectedId = bootLaunch.substringBefore('/'),
+                                enabled = canChange && !homeBoot,
+                            ) { pkg ->
+                                ActivityList.load(context, pkg).firstOrNull()?.let {
+                                    bootLaunch = android.content.ComponentName(pkg, it.className).flattenToString()
+                                    BootFlags.setLaunchTarget(context, bootLaunch)
+                                }
+                            }
+                        }
+                        indentedItem {
+                            DropdownRow(
+                                label = context.getString(R.string.label_boot_activity),
+                                options = bootActs,
+                                selectedId = bootLaunch,
+                                enabled = canChange && !homeBoot,
+                            ) { comp ->
+                                bootLaunch = comp
+                                BootFlags.setLaunchTarget(context, comp)
+                            }
+                        }
+                    }
                     item { SectionHeader(context.getString(R.string.section_debloat), secDebloat) { secDebloat = !secDebloat } }
                     if (secDebloat) {
                         indentedItem { Text(context.getString(R.string.debloat_disclaimer), color = Oled.textSecondary, fontSize = 10.sp, lineHeight = 12.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)) }
                         indentedItem {
-                            ActionRow(context.getString(R.string.label_update_indexes), AppIcons.Card, busy = indexBusy, subtitle = context.getString(R.string.subtitle_update_indexes)) {
+                            ActionRow(context.getString(R.string.label_update_indexes), Icons.Default.Refresh, busy = indexBusy, subtitle = context.getString(R.string.subtitle_update_indexes)) {
                                 updateIndexes()
                             }
                         }
@@ -1050,8 +1191,14 @@ indentedToggleItems(
                             )
                         }
                         indentedItem {
-                            ActionRow(context.getString(R.string.debloat_download_uad), AppIcons.Card,
-                                subtitle = context.getString(R.string.debloat_uad_subtitle)) {
+                            ActionRow(
+                                context.getString(R.string.credit_uad), AppIcons.ExternalLink,
+                                subtitle = context.getString(R.string.credit_uad_subtitle),
+                            ) { openUrl(context, "https://github.com/Universal-Debloater-Alliance/universal-android-debloater-next-generation") }
+                        }
+                        indentedItem {
+                            ActionRow(context.getString(R.string.debloat_download_uad), Icons.Default.PlayArrow,
+                                subtitle = context.getString(R.string.debloat_uad_subtitle), busy = listBusy) {
                                 runDebloat(Debloat.UAD_NG, "uad-ng")
                             }
                         }
@@ -1060,7 +1207,7 @@ indentedToggleItems(
                                 label = context.getString(R.string.debloat_custom_url),
                                 value = debloatUrl,
                                 placeholder = context.getString(R.string.debloat_custom_subtitle),
-                                icon = AppIcons.Card,
+                                icon = Icons.Default.PlayArrow,
                                 actionDescription = context.getString(R.string.debloat_download_custom),
                                 enabled = debloatUrl.isNotBlank(),
                                 busy = listBusy,
@@ -1077,10 +1224,13 @@ indentedToggleItems(
                     item { SectionHeader(context.getString(R.string.section_install_apk), secInstall) { secInstall = !secInstall } }
                     if (secInstall) {
                         indentedToggleItems(listOf(ToggleSpec(
-                            "unknown_sources", R.string.advanced_apps_other_sources, unknownSources,
-                            subtitleRes = R.string.unknown_sources_subtitle,
-                            enabled = canChange,
-                        ) { want -> change("apps from other sources") { SystemSettings.setUnknownSources(context, want) } }))
+                            "allow_installs", R.string.label_install_packages, unknownSources,
+                            subtitleRes = R.string.subtitle_install_packages,
+                            enabled = shizukuReady,
+                        ) { want ->
+                            unknownSources = want
+                            change("installing apps") { SystemSettings.setUnknownSources(context, want) }
+                        }))
                         indentedItem {
                             DownloadRow(
                                 url = apkUrl,
@@ -1097,10 +1247,7 @@ indentedToggleItems(
                                         lastDownload = -1L
                                         dlProgress = null
                                     } else {
-                                        ApkDownloads.resolve(apkUrl)?.let { u ->
-                                            lastDownload = ApkDownloads.start(context, u, dlFolder, dlName.ifEmpty { ApkDownloads.defaultName(u) })
-                                            context.toast(context.getString(R.string.download_started))
-                                        }
+                                        startDownload()
                                     }
                                 },
                             )
@@ -1139,6 +1286,23 @@ indentedToggleItems(
                                 )
                             }
                         }
+                       item {
+                            Column(modifier = Modifier.padding(start = 12.dp)) {
+                                SectionHeader(context.getString(R.string.section_recommended), secRecommended) { secRecommended = !secRecommended }
+                                if (secRecommended) {
+                                    Text(
+                                        stringResource(R.string.rec_disclaimer),
+                                        color = Oled.textSecondary, fontSize = 10.sp, lineHeight = 12.sp,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                    )
+                                    Recommended.list.forEach { app ->
+                                        Box(modifier = Modifier.padding(start = 12.dp)) {
+                                            CompactLink(app.name, stringResource(app.description), AppIcons.ExternalLink) { openUrl(context, app.url) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
                     indentedItem {
                         installUri?.let { uri ->
@@ -1158,7 +1322,7 @@ indentedToggleItems(
                                 onDismiss = { installUri = null },
                             )
                         }
-                    }
+                     }
                     item { SectionHeader(context.getString(R.string.section_diagnostics), diagOpen) { diagOpen = !diagOpen } }
                     if (diagOpen) indentedItems(rows, key = { "diag:" + it.first }) { (label, value) ->
                         InfoRow(label, value)
@@ -1228,7 +1392,7 @@ private fun collectDiagnostics(context: Context, state: ShizukuManager.State): L
 
 // Collapsible section title with a chevron; OK or a click toggles it
 @Composable
-fun SectionHeader(title: String, open: Boolean, onToggle: () -> Unit) {
+fun SectionHeader(title: String, open: Boolean, dot: Color? = null, trailing: String? = null, onToggle: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     Row(
@@ -1245,6 +1409,15 @@ fun SectionHeader(title: String, open: Boolean, onToggle: () -> Unit) {
             title, color = Oled.textSecondary, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
             modifier = Modifier.weight(1f)
         )
+        // live text (e.g. CPU and RAM), then a dot for live state (e.g. the app is running), left of the chevron
+        trailing?.let {
+            Text(it, color = Oled.textSecondary, fontSize = 10.sp)
+            Spacer(modifier = Modifier.width(8.dp))
+        }
+        dot?.let {
+            Box(modifier = Modifier.size(7.dp).background(it, CircleShape))
+            Spacer(modifier = Modifier.width(8.dp))
+        }
         Icon(
             imageVector = if (open) Icons.Default.KeyboardArrowUp else Icons.Default.KeyboardArrowDown,
             contentDescription = if (open) "Collapse" else "Expand",
@@ -1273,8 +1446,6 @@ private val TIMEOUT_PRESETS = listOf(
     "600000" to "10 minutes", "900000" to "15 minutes", "1800000" to "30 minutes", "3600000" to "1 hour",
 )
 
-//    Regex("""Cache Size: (\d+)""").findAll(Shell.dumpsys("diskstats").output)
-//        .sumOf { it.groupValues[1].toLong() } / (1024 * 1024)
 
 // The label of the screensaver that is selected: its service's label, which is the app's name when it has none of its own
 fun currentScreensaver(context: Context): String {

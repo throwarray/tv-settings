@@ -80,7 +80,22 @@ object ElevatedShellManager {
         binder = null
     }
 
-    // Starts (or with null, stops) the Home press watcher inside the shell service. Blocking.
+    // One line to the pointer injector (see PointerPipe): "ok" or "fail"; null when the shell service isn't bound.
+    fun pointer(command: String): String? {
+        val bound = binder ?: return null
+        val data = Parcel.obtain()
+        val reply = Parcel.obtain()
+        return try {
+            data.writeString(command)
+            bound.transact(ShellBinder.TRANSACTION_POINTER, data, reply, 0)
+            reply.readString()
+        } catch (e: Exception) {
+            null
+        } finally {
+            data.recycle()
+            reply.recycle()
+        }
+    }
 
     fun runCommand(command: String): String {
         val bound = binder ?: throw IllegalStateException("UserService not bound — call bind() and wait for onConnected first")

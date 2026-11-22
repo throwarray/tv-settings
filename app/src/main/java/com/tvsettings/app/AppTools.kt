@@ -69,3 +69,10 @@ object AppSettingsLinks {
         context.startActivity(Intent(action, Uri.parse("package:$pkg")).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 }
+
+/** Opens a link in whatever browser the device has */
+fun openUrl(context: android.content.Context, url: String) {
+    runCatching {
+        context.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+    }.onFailure { context.toast(context.getString(R.string.no_browser)) }
+}

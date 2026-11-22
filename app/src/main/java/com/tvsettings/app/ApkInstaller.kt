@@ -8,7 +8,6 @@ import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
-import android.provider.Settings
 
 // Installs through PackageInstaller under REQUEST_INSTALL_PACKAGES. Shizuku can grant that app-op once.
 object ApkInstaller {
@@ -16,13 +15,8 @@ object ApkInstaller {
         if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls() && ShizukuManager.isReady) {
             Shell.appOpsSet(context.packageName, "REQUEST_INSTALL_PACKAGES", "allow")
         }
-        if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) {
-            context.startActivity(
-                Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${context.packageName}"))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            )
-            return false
-        }
+        // without the install permission there is no screen to send the user to on this device: report it
+        if (Build.VERSION.SDK_INT >= 26 && !context.packageManager.canRequestPackageInstalls()) return false
         val input = context.contentResolver.openInputStream(uri) ?: return false
         input.use { apkInput ->
             val pi = context.packageManager.packageInstaller

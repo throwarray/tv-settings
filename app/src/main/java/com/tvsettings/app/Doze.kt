@@ -7,6 +7,7 @@ object Doze {
     const val NORMAL = "normal"
     const val EXIT = "exit"
     const val IDLE = "idle"
+    const val RESTRICT = "restrict"
 
     /** Screens that take the foreground for a moment and give it back: the app under them hasn't been left. */
     val TRANSIENT_UI = setOf(
@@ -17,7 +18,7 @@ object Doze {
     )
 
     private const val PREFS = "doze"
-    private val MODES = setOf(NORMAL, EXIT, IDLE)
+    private val MODES = setOf(NORMAL, EXIT, IDLE, RESTRICT)
 
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -34,12 +35,21 @@ object Doze {
         Shell.Cmd.idleWhitelist(pkg, false),
     )
 
-    private fun commands(pkg: String, mode: String): List<String> =
-        if (mode == IDLE) listOf(
+    private fun commands(pkg: String, mode: String): List<String> = when (mode) {
+        // restricted: no background run and a restricted standby bucket. Nothing is stopped.
+        RESTRICT -> listOf(
+            Shell.Cmd.appOps(pkg, "RUN_ANY_IN_BACKGROUND", "ignore"),
+            Shell.Cmd.appOps(pkg, "RUN_IN_BACKGROUND", "ignore"),
+            Shell.Cmd.standbyBucket(pkg, "restricted"),
+            Shell.Cmd.idleWhitelist(pkg, false),
+        )
+        IDLE -> listOf(
             Shell.Cmd.appOps(pkg, "RUN_ANY_IN_BACKGROUND", "default"),
             Shell.Cmd.appOps(pkg, "RUN_IN_BACKGROUND", "default"),
             Shell.Cmd.idleWhitelist(pkg, true),
-        ) else reset(pkg)
+        )
+        else -> reset(pkg)
+    }
 
     // Applies the mode now and saves it. "Close on exit" is done by the accessibility service when the app is left.
     fun apply(context: Context, pkg: String, mode: String): Boolean {

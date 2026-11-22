@@ -29,6 +29,19 @@ object ApkDownloads {
         }
     }
 
+    private const val FDROID = "https://f-droid.org"
+
+    /** A recommended app's APK: F-Droid's package page is read for its newest APK link. Null when it can't be found. */
+    fun recommendedApk(pkg: String): String? {
+        if (pkg == "org.fdroid.fdroid") return "$FDROID/F-Droid.apk"
+        val page = runCatching { java.net.URL(recommendedPage(pkg)).openStream().bufferedReader().use { it.readText() } }.getOrNull()
+            ?: return null
+        val link = Regex("href=\"(/repo/" + Regex.escape(pkg) + "_[^\"]+\\.apk)").find(page)?.groupValues?.get(1) ?: return null
+        return FDROID + link
+    }
+
+    fun recommendedPage(pkg: String): String = "$FDROID/packages/$pkg/"
+
     fun defaultName(url: String): String = Uri.parse(url).lastPathSegment?.takeIf { it.isNotBlank() } ?: "download"
 
     // folder null: the public Downloads folder. Any file type: a zip or other archive is as likely as an apk.

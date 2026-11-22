@@ -175,18 +175,21 @@ object ActivityList {
     }
 
     // Starred activities go through LaunchTrampolineActivity, which only starts shortcut-allowed activities.
-    fun createShortcut(context: Context, pkg: String, cls: String, label: String, iconSpec: String?, starred: Boolean) {
+    fun createShortcut(
+        context: Context, pkg: String, cls: String, label: String, iconSpec: String?,
+        starred: Boolean, viaTrampoline: Boolean = starred,
+    ) {
         val sm = if (Build.VERSION.SDK_INT >= 26) context.getSystemService(ShortcutManager::class.java) else null
         if (sm == null || !sm.isRequestPinShortcutSupported) {
             context.toast("This launcher doesn't accept shortcuts")
             return
         }
         val key = "$pkg/$cls"
-        if (starred && !ShizukuManager.isReady) {
-            context.toast("Shortcuts to * activities need Shizuku running")
+        if (viaTrampoline && !ShizukuManager.isReady) {
+            context.toast("Shortcuts through the trampoline need Shizuku running")
             return
         }
-        val intent = if (starred) {
+        val intent = if (viaTrampoline) {
             ActivityPrefs.allowShortcut(context, key)
             Intent(context, LaunchTrampolineActivity::class.java)
                 .setAction(LaunchTrampolineActivity.ACTION)
@@ -320,6 +323,14 @@ fun ActivityRow(
                     subtitle = if (entry.starred) context.getString(R.string.privileged_activity_subtitle) else null,
                 ) {
                     ActivityList.createShortcut(context, pkg, entry.className, shownLabel, pendingIcon, entry.starred)
+                }
+                if (!entry.starred) {
+                    ActionRow(
+                        context.getString(R.string.create_trampoline_shortcut), Icons.Default.Add,
+                        subtitle = context.getString(R.string.trampoline_shortcut_subtitle),
+                    ) {
+                        ActivityList.createShortcut(context, pkg, entry.className, shownLabel, pendingIcon, false, viaTrampoline = true)
+                    }
                 }
                 ActionRow(context.getString(R.string.rename), Icons.Default.Edit) { sub = if (sub == "rename") null else "rename" }
                 ActionRow(context.getString(R.string.change_icon_to_app), Icons.Default.Star) { sub = if (sub == "icon") null else "icon" }

@@ -71,6 +71,7 @@ struct crule { int prof, code, layer; char action[256]; };
 static struct crule *crules; static int ncrules, capcrules;
 static char (*profs)[128]; static int nprofs, capprofs;
 static int cfg_double_ms = 250, cfg_hold_ms = 600;
+static int cfg_mouse_pct = 100;   /* pointer speed in percent of the default steps: "set mouse_speed <n>" */
 static int eff[MAXKEY][3];          /* effective rule index per code/layer, -1 = none (implicit orig) */
 static int nmapped;
 static char active_prof[128] = "default";
@@ -156,7 +157,7 @@ static void add_rule(int prof, const rmp_rule *r) {
 static unsigned char mouse_toggle_key[MAXKEY];
 
 static void parse_conf(void) {
-    ncrules = 0; nprofs = 0; cfg_double_ms = 250; cfg_hold_ms = 600;
+    ncrules = 0; nprofs = 0; cfg_double_ms = 250; cfg_hold_ms = 600; cfg_mouse_pct = 100;
     memset(mouse_toggle_key, 0, sizeof mouse_toggle_key);
     prof_index("default", 1);
     FILE *f = fopen(conf_path, "r"); if (!f) return;
@@ -167,7 +168,9 @@ static void parse_conf(void) {
         if (r.kind == RMP_RULE && r.code >= 0 && r.code < MAXKEY && strstr(r.action, "mouse_toggle")) mouse_toggle_key[r.code] = 1;
         if (r.kind == RMP_PROFILE) cur = prof_index(r.name, 1);
         else if (r.kind == RMP_SET) {
-            if (!strcmp(r.name, "double_ms")) cfg_double_ms = r.value; else cfg_hold_ms = r.value;
+            if (!strcmp(r.name, "double_ms")) cfg_double_ms = r.value;
+            else if (!strcmp(r.name, "hold_ms")) cfg_hold_ms = r.value;
+            else if (!strcmp(r.name, "mouse_speed")) cfg_mouse_pct = r.value > 0 ? r.value : 100;
         } else add_rule(cur, &r);
     }
     free(line); fclose(f);
@@ -767,6 +770,12 @@ static void mouse_check_cmd(void) {
     else if (!strcmp(w, "toggle")) mouse_set(!mouse_on);
 }
 
+/* a default step scaled by the pointer speed, never below one count */
+static int mouse_step(int base) {
+    int s = base * cfg_mouse_pct / 100;
+    return s < 1 ? 1 : s;
+}
+
 /* 1 when the key belongs to the pointer in mouse mode (and was handled), 0 to let it through */
 static int mouse_key(int code, int value) {
     int d = code == KEY_UP ? 0 : code == KEY_DOWN ? 1 : code == KEY_LEFT ? 2 : code == KEY_RIGHT ? 3 : -1;
@@ -775,7 +784,8 @@ static int mouse_key(int code, int value) {
         if (value == 1) {
             if (!m_dir_at[0] && !m_dir_at[1] && !m_dir_at[2] && !m_dir_at[3]) m_last = t;
             m_dir_at[d] = t;
-            mouse_send(d == 2 ? -3 : d == 3 ? 3 : 0, d == 0 ? -3 : d == 1 ? 3 : 0, 0);   /* a tap is a small, exact step */
+            int s = mouse_step(3);
+            mouse_send(d == 2 ? -s : d == 3 ? s : 0, d == 0 ? -s : d == 1 ? s : 0, 0);   /* a tap is a small, exact step */
         } else if (value == 0) m_dir_at[d] = 0;
         return 1;
     }
@@ -796,7 +806,7 @@ static int mouse_key(int code, int value) {
 static int mouse_pass(int code, int value) {
     int d = code == KEY_UP ? 0 : code == KEY_DOWN ? 1 : code == KEY_LEFT ? 2 : code == KEY_RIGHT ? 3 : -1;
     if (d >= 0) {
-        if (value == 1) mouse_send(d == 2 ? -12 : d == 3 ? 12 : 0, d == 0 ? -12 : d == 1 ? 12 : 0, 0);
+        if (value == 1) { int s = mouse_step(12); mouse_send(d == 2 ? -s : d == 3 ? s : 0, d == 0 ? -s : d == 1 ? s : 0, 0); }
         return 1;
     }
     if (code == KEY_KPENTER || code == KEY_ENTER || code == KEY_SELECT) {
@@ -833,7 +843,7 @@ static void mouse_tick(void) {
         double held = (t - m_dir_at[d]) / 1000.0;
         if (held < 0.18) continue;                      /* the tap step above stands alone first */
         double k = (held - 0.18) / 1.0; if (k > 1) k = 1;
-        double v = 140 + 1100 * k * k;                  /* counts per second: slow start for aiming, then fast */
+        double v = (140 + 1100 * k * k) * cfg_mouse_pct / 100.0;   /* counts per second: slow start for aiming, then fast */
         if (d == 0) vy -= v; else if (d == 1) vy += v; else if (d == 2) vx -= v; else vx += v;
     }
     m_fx += vx * dt; m_fy += vy * dt;

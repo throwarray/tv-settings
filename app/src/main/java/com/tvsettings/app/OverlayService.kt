@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
+import android.graphics.Color
 import android.graphics.Path
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
@@ -17,12 +18,18 @@ import android.net.NetworkRequest
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.DisplayMetrics
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
+
+// The running service, so boot can ask it for a redirect (see KeepAlive)
+@Volatile
+var overlayServiceInstance: OverlayService? = null
 
 object OverlayPrefs {
     const val PREFS = "tvsettings"
@@ -38,13 +45,8 @@ object OverlayPrefs {
 
     fun dotEnabled(context: Context): Boolean = prefs(context).getBoolean(DOT, false)
 
-    // slow | normal | fast: how far a scroll key drags, in pixels
-
-    // black-screen time between the intercepted home appearing and the redirect
-    // One delay for both: the remap double-press delay
+    // black-screen time between the intercepted home and the redirect: the remap double-press delay
     fun homeDelayMs(context: Context): Int = RemapEngine.doubleMs(context)
-
-    // white | yellow | cyan | green | red | magenta
 
     fun setDot(context: Context, enabled: Boolean): Boolean = set(context, DOT, enabled)
 
@@ -67,7 +69,7 @@ object OverlayPrefs {
     }
 
     // the accessibility service is needed by the mouse, the dot and the home redirect
-    fun wantsService(context: Context): Boolean = dotEnabled(context) || homeRedirectEnabled(context)
+    fun wantsService(context: Context): Boolean = dotEnabled(context) || homeRedirectEnabled(context) || mouseEnabled(context)
 
     fun setHomeRedirect(context: Context, enabled: Boolean, intercept: String, launch: String): Boolean {
         prefs(context).edit()
@@ -95,6 +97,76 @@ object OverlayPrefs {
         KeepAlive.sync(context)
         return ok
     }
+
+    private const val MOUSE = "mouse_enabled"
+    private const val BACKEND = "mouse_backend"
+    private const val SPEED = "mouse_speed"
+    private const val MOUSE_COLOR = "mouse_color"
+    private const val SCROLL_SPEED = "scroll_speed"
+    fun mouseEnabled(context: Context): Boolean = prefs(context).getBoolean(MOUSE, false)
+
+    // auto | remap | accessibility (an old "adb" setting means accessibility)
+    fun backend(context: Context): String = when (prefs(context).getString(BACKEND, null)) {
+        MouseBackend.REMAP -> MouseBackend.REMAP
+        MouseBackend.ACCESSIBILITY, "adb" -> MouseBackend.ACCESSIBILITY
+        else -> MouseBackend.AUTO
+    }
+
+    fun setBackend(context: Context, backend: String) {
+        prefs(context).edit().putString(BACKEND, backend).apply()
+    }
+
+    fun speed(context: Context): String = prefs(context).getString(SPEED, null) ?: "medium"
+
+    fun setSpeed(context: Context, speed: String) {
+        prefs(context).edit().putString(SPEED, speed).apply()
+    }
+
+    // slow | normal | fast: how far a scroll key drags, in pixels
+    fun scrollSpeedName(context: Context): String = prefs(context).getString(SCROLL_SPEED, null) ?: "normal"
+
+    fun setScrollSpeed(context: Context, name: String) {
+        prefs(context).edit().putString(SCROLL_SPEED, name).apply()
+    }
+
+    fun scrollDistance(context: Context): Int = when (scrollSpeedName(context)) {
+        "slow" -> 160
+        "fast" -> 560
+        else -> 320
+    }
+
+    // white | yellow | cyan | green | red | magenta
+    fun cursorColorName(context: Context): String = prefs(context).getString(MOUSE_COLOR, null) ?: "white"
+
+    fun setCursorColor(context: Context, name: String) {
+        prefs(context).edit().putString(MOUSE_COLOR, name).apply()
+    }
+
+    fun cursorColor(context: Context): Int = when (cursorColorName(context)) {
+        "yellow" -> Color.YELLOW
+        "cyan" -> Color.CYAN
+        "green" -> Color.GREEN
+        "red" -> Color.RED
+        "magenta" -> Color.MAGENTA
+        else -> Color.WHITE
+    }
+
+    // The same speed in percent: the remap pointer's steps (set mouse_speed) and the cursor's step both use it
+    fun speedPercent(context: Context): Int = when (speed(context)) {
+        "slow" -> 40
+        "fast" -> 100
+        "faster" -> 140
+        else -> 65
+    }
+
+    fun speedFactor(context: Context): Float = when (speed(context)) {
+        "slow" -> 0.4f
+        "fast" -> 1f
+        "faster" -> 1.4f
+        else -> 0.65f
+    }
+
+    fun setMouse(context: Context, enabled: Boolean): Boolean = set(context, MOUSE, enabled)
 }
 
 /**
@@ -114,6 +186,23 @@ class OverlayService : AccessibilityService() {
     private var dotColorCache = 0
     private var dotRegistered = false
     private val vpnNetworks = mutableSetOf<Network>()
+
+    // accessibility mouse state
+    private var active = false                 // cursor shown; keys drive it
+    private var lastPlay = 0L                  // last Play press, for the double press
+    private var swallowPlayUp = false          // the second Play press's key-up is eaten too
+    private var x = 0
+    private var y = 0
+    private var maxX = 0
+    private var maxY = 0
+    private var cursorHalf = 0
+    private var cursor: View? = null
+    private var cursorParams: WindowManager.LayoutParams? = null
+    private var holding = false                // OK is down (a real DOWN has been sent)
+    private val held = mutableSetOf<Int>()     // D-pad keys currently down
+    private var ticking = false
+    private var heldSince = 0L
+    private val moveInFlight = AtomicBoolean(false)
 
     private val vpnCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
@@ -231,8 +320,8 @@ class OverlayService : AccessibilityService() {
 
     // Key path: every Home press reaches here first.
     override fun onKeyEvent(event: KeyEvent): Boolean {
-        // the engine grabs the remote while it runs: these keys never reach here
-        if (RemapEngine.active(this)) return false
+        // remapd forwards the keys it doesn't map, so the cursor still gets the arrows and Play while it runs
+        if (mouseKey(event)) return true
         if (event.keyCode == KeyEvent.KEYCODE_APP_SWITCH && RemapEngine.recents(this)) {
             if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
                 try {
@@ -368,7 +457,7 @@ class OverlayService : AccessibilityService() {
     override fun onServiceConnected() {
         overlayServiceInstance = this
         registerHomeReceiver()
-        io.execute { if (ShizukuManager.isReady) Doze.migrate(this) }
+        io.execute { if (ShizukuManager.isReady) { Doze.migrate(this); NetBlock.reapply(this) } }
         getSharedPreferences(OverlayPrefs.PREFS, Context.MODE_PRIVATE).registerOnSharedPreferenceChangeListener(prefsListener)
         onPrefsChanged()
         handler.removeCallbacks(watcherTick)
@@ -567,11 +656,272 @@ class OverlayService : AccessibilityService() {
         const val REDIRECT_COOLDOWN_MS = 2_500L
         const val LONG_SUPPRESS_MS = 1_500L
         const val DOT_CYCLE_MS = 4_000L
+        const val DOUBLE_PRESS_MS = 400L
+        const val BASE_STEP = 12
+        const val TICK_MS = 16L
         val DOT_ON = 0xFF8CF3A5.toInt()
         val DOT_OFF = 0xFFFF5A5A.toInt()
         val DOT_WARN = 0xFFFFC107.toInt()
     }
-}
 
-// The running accessibility service, for the boot receiver to hand off to.
-@Volatile var overlayServiceInstance: OverlayService? = null
+    // ---------------------------------------------------------------- mouse
+
+    // the accessibility mouse: its keys come here only while the remap engine is not running
+    private fun mouseKey(event: KeyEvent): Boolean {
+        if (OverlayPrefs.mouseEnabled(this) && (event.keyCode == KeyEvent.KEYCODE_MENU || event.keyCode == KeyEvent.KEYCODE_MEDIA_NEXT)) {
+            // scroll keys replace their default actions while the mouse is on
+            if (event.action == KeyEvent.ACTION_DOWN) scrollAt(if (event.keyCode == KeyEvent.KEYCODE_MENU) -1 else 1)
+            return true
+        }
+        if (!OverlayPrefs.mouseEnabled(this)) return false
+        val down = event.action == KeyEvent.ACTION_DOWN
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_MEDIA_PLAY, KeyEvent.KEYCODE_MEDIA_PAUSE -> {
+                if (!down) return swallowPlayUp.also { swallowPlayUp = false }
+                if (event.repeatCount == 0) {
+                    val now = SystemClock.uptimeMillis()
+                    if (now - lastPlay < DOUBLE_PRESS_MS) {
+                        // the first press already reached the app; only the second is swallowed
+                        lastPlay = 0
+                        swallowPlayUp = true
+                        setActive(!active)
+                        return true
+                    }
+                    lastPlay = now
+                }
+                return false
+            }
+        }
+        if (!active) return false
+        return when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP, KeyEvent.KEYCODE_DPAD_DOWN, KeyEvent.KEYCODE_DPAD_LEFT, KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                direction(event.keyCode, down)
+                true
+            }
+            KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent.KEYCODE_ENTER -> {
+                if (event.repeatCount == 0) {
+                    if (down) pressDown() else pressUp()
+                }
+                true
+            }
+            KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
+                if (down && event.repeatCount == 0) scroll(-1)
+                true
+            }
+            KeyEvent.KEYCODE_MEDIA_REWIND -> {
+                if (down && event.repeatCount == 0) scroll(1)
+                true
+            }
+            KeyEvent.KEYCODE_BACK -> {
+                if (!down) setActive(false)
+                true
+            }
+            else -> false
+        }
+    }
+
+    // Movement is driven by our own timer while a key is held, not by key-repeat events.
+    // Keeps moving while a D-pad key is held; the step grows the longer it is held
+    private val moveTick: Runnable = Runnable {
+        if (held.isEmpty()) {
+            ticking = false
+            return@Runnable
+        }
+        val heldFor = SystemClock.uptimeMillis() - heldSince
+        val ramp = 1f + 1.5f * (heldFor / 1000f).coerceAtMost(1f)
+        moveBy((scaled(BASE_STEP) * ramp).toInt().coerceAtLeast(1))
+        handler.postDelayed(moveTick, TICK_MS)
+    }
+
+    private fun direction(code: Int, down: Boolean) {
+        if (!down) {
+            held.remove(code)
+            return
+        }
+        if (code in held) return
+        held.add(code)
+        moveBy(scaled(BASE_STEP)) // so a quick tap still moves
+        if (!ticking) {
+            ticking = true
+            heldSince = SystemClock.uptimeMillis()
+            handler.postDelayed(moveTick, TICK_MS)
+        }
+    }
+
+    private fun scaled(step: Int) = (step * OverlayPrefs.speedFactor(this)).toInt().coerceAtLeast(1)
+
+    private fun moveBy(step: Int) {
+        var dx = 0
+        var dy = 0
+        if (KeyEvent.KEYCODE_DPAD_LEFT in held) dx -= step
+        if (KeyEvent.KEYCODE_DPAD_RIGHT in held) dx += step
+        if (KeyEvent.KEYCODE_DPAD_UP in held) dy -= step
+        if (KeyEvent.KEYCODE_DPAD_DOWN in held) dy += step
+        if (dx == 0 && dy == 0) return
+        x = (x + dx).coerceIn(0, maxX)
+        y = (y + dy).coerceIn(0, maxY)
+        val layout = cursorParams
+        val view = cursor
+        if (layout != null && view != null) {
+            layout.x = x - cursorHalf
+            layout.y = y - cursorHalf
+            windowManager().updateViewLayout(view, layout)
+        }
+        if (holding) sendMove()
+    }
+
+    private fun setActive(on: Boolean) {
+        if (on == active) return
+        active = on
+        held.clear()
+        if (!on) pressUp()
+        if (on) showCursor() else hideCursor()
+        toast(getString(if (active) R.string.mouse_on else R.string.mouse_off))
+    }
+
+    // Redraws a visible cursor so a colour change shows at once
+    fun refreshCursor() {
+        if (cursor != null) {
+            hideCursor()
+            showCursor()
+        }
+    }
+
+    private fun showCursor() {
+        val metrics = DisplayMetrics()
+        @Suppress("DEPRECATION")
+        windowManager().defaultDisplay.getRealMetrics(metrics)
+        maxX = metrics.widthPixels - 1
+        maxY = metrics.heightPixels - 1
+        if (x == 0 && y == 0) {
+            x = maxX / 2
+            y = maxY / 2
+        }
+        val size = (16 * metrics.density).toInt()
+        cursorHalf = size / 2
+        val tint = OverlayPrefs.cursorColor(this)
+        val view = View(this).apply {
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(tint)
+                setStroke((2 * metrics.density).toInt(), Color.BLACK)
+            }
+        }
+        val layout = mouseOverlayParams(size)
+        layout.gravity = Gravity.TOP or Gravity.START
+        layout.x = x - cursorHalf
+        layout.y = y - cursorHalf
+        try {
+            windowManager().addView(view, layout)
+            cursor = view
+            cursorParams = layout
+        } catch (_: Exception) {
+            active = false
+        }
+    }
+
+    private fun hideCursor() {
+        cursor?.let {
+            try {
+                windowManager().removeView(it)
+            } catch (_: Exception) {
+            }
+        }
+        cursor = null
+        cursorParams = null
+    }
+
+    // Shizuku when it's connected, otherwise an accessibility gesture
+    private fun press(viaShell: () -> Boolean, viaGesture: () -> Unit) {
+        if (!ShizukuManager.isReady) {
+            viaGesture()
+            return
+        }
+        io.execute { if (!viaShell()) handler.post { viaGesture() } }
+    }
+
+    private fun tap(px: Int, py: Int) =
+        press({ PointerPipe.tap(this, px, py) || Shell.tap(px, py).ok }) { gesture(Path().apply { moveTo(px.toFloat(), py.toFloat()) }, 50) }
+
+    // With Shizuku, OK sends a real DOWN and UP, so holding OK holds the press while the cursor moves.
+    // Without Shizuku a press is only a tap.
+    // Swipe through the cursor point: +1 scrolls down (finger moves up), -1 scrolls up. Needs Shizuku.
+    private fun scrollAt(direction: Int) {
+        val half = OverlayPrefs.scrollDistance(this) / 2
+        val fromY = (y + direction * half).coerceAtLeast(0)
+        val toY = (y - direction * half).coerceAtLeast(0)
+        val px = x
+        io.execute {
+            if (!(PointerPipe.swipe(this, px, fromY, px, toY, 250) || Shell.swipe(px, fromY, px, toY, 250).ok)) {
+                handler.post { toast("Scroll failed: Shizuku isn't running") }
+            }
+        }
+    }
+
+    private fun pressDown() {
+        if (!ShizukuManager.isReady) {
+            tap(x, y)
+            return
+        }
+        if (holding) return
+        holding = true
+        sendMotion("DOWN", x, y)
+    }
+
+    private fun pressUp() {
+        if (!holding) return
+        holding = false
+        sendMotion("UP", x, y)
+    }
+
+    private fun sendMotion(action: String, px: Int, py: Int) {
+        io.execute {
+            if (!(PointerPipe.motion(this, action, px, py) || Shell.motion(action, px, py).ok)) {
+                handler.post { toast("Press failed: Shizuku isn't running") }
+            }
+        }
+    }
+
+    // One move is queued at a time, so the cursor never falls far behind the pointer.
+    private fun sendMove() {
+        if (!moveInFlight.compareAndSet(false, true)) return
+        val px = x
+        val py = y
+        io.execute {
+            try {
+                PointerPipe.motion(this, "MOVE", px, py) || Shell.motion("MOVE", px, py).ok
+            } finally {
+                moveInFlight.set(false)
+            }
+        }
+    }
+
+    // direction: 1 swipes down (content moves down), -1 swipes up
+    private fun scroll(direction: Int) {
+        val half = 200 * direction
+        val from = (y - half).coerceIn(0, maxY)
+        val to = (y + half).coerceIn(0, maxY)
+        val column = x
+        press({ PointerPipe.swipe(this, column, from, column, to, 250) || Shell.swipe(column, from, column, to, 250).ok }) {
+            gesture(
+                Path().apply {
+                    moveTo(column.toFloat(), from.toFloat())
+                    lineTo(column.toFloat(), to.toFloat())
+                },
+                250
+            )
+        }
+    }
+
+
+
+    private fun mouseOverlayParams(size: Int) = WindowManager.LayoutParams(
+        size, size,
+        WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
+        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+            WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE or
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+        PixelFormat.TRANSLUCENT
+    )
+
+}

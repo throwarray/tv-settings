@@ -192,9 +192,19 @@ class KeepAliveReceiver : BroadcastReceiver() {
 }
 
 /** After boot or an update: mock location, the enforcer, and one forced write. */
+private const val BOOT_LAUNCH_DELAY_MS = 3000L
+
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (MockLocation.isEnabled(context)) MockLocation.start(context)
+        // accessibility is enforced on boot and after an update, whatever the keep-accessibility setting says
+        if (intent.action == android.content.Intent.ACTION_BOOT_COMPLETED || intent.action == android.content.Intent.ACTION_MY_PACKAGE_REPLACED) {
+            Thread {
+                ServiceSettings.ensureAccessibility(context, android.content.ComponentName(context, OverlayService::class.java).flattenToString())
+                // an update replaces the remap binary and its files: a running engine has to start again
+                if (intent.action == android.content.Intent.ACTION_MY_PACKAGE_REPLACED) RemapEngine.restartIfEnabled(context)
+            }.start()
+        }
         if (intent.action == android.content.Intent.ACTION_MY_PACKAGE_REPLACED) {
             // an update drops the accessibility binding; writing the saved setting again restores it
             OverlayPrefs.setHomeRedirect(
@@ -204,7 +214,25 @@ class BootReceiver : BroadcastReceiver() {
                 OverlayPrefs.homeLaunchTarget(context),
             )
         }
-        if (intent.action == android.content.Intent.ACTION_BOOT_COMPLETED && OverlayPrefs.homeOnBoot(context)) {
+        val bootTarget = if (intent.action == android.content.Intent.ACTION_BOOT_COMPLETED) {
+            BootFlags.applyAtBoot(context)
+            // home on boot takes priority: the launcher chosen for Home in Remapping
+            val home = if (OverlayPrefs.homeOnBoot(context)) OverlayPrefs.homeLaunchTarget(context) else null
+            val chosen = if (BootFlags.get(context, "launch_on")) BootFlags.launchTarget(context) else null
+            android.content.ComponentName.unflattenFromString(home ?: chosen ?: "")
+                ?.takeIf { it.packageName != context.packageName }
+        } else null
+        if (bootTarget != null) {
+            // the home screen isn't ready at BOOT_COMPLETED: launch once, a moment later. goAsync keeps the receiver alive for it.
+            val pending = goAsync()
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                runCatching {
+                    context.startActivity(android.content.Intent(android.content.Intent.ACTION_MAIN).setComponent(bootTarget).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK))
+                }
+                pending.finish()
+            }, BOOT_LAUNCH_DELAY_MS)
+        }
+        if (intent.action == android.content.Intent.ACTION_BOOT_COMPLETED && bootTarget == null && OverlayPrefs.homeOnBoot(context)) {
             val live = overlayServiceInstance
             if (live != null) {
                 runCatching { live.requestBootRedirect() }

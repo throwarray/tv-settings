@@ -19,14 +19,17 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Info
@@ -62,6 +65,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.CoroutineScope
@@ -495,8 +499,44 @@ fun StatRow(label: String, value: String) {
             .padding(horizontal = 10.dp, vertical = 1.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(label, color = Oled.textSecondary, fontSize = 11.sp, modifier = Modifier.width(96.dp))
-        Text(value, color = Oled.textPrimary, fontSize = 11.sp, lineHeight = 13.sp, modifier = Modifier.weight(1f))
+        Text(label, color = Oled.textSecondary, fontSize = 10.sp, modifier = Modifier.width(96.dp))
+        Text(value, color = Oled.textPrimary, fontSize = 10.sp, lineHeight = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+    }
+}
+
+// Lines of text as one focusable unit: clicking or OK folds it
+@Composable
+fun TextChunk(lines: List<String>, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (focused) Oled.rowFocused else Color.Transparent, RoundedCornerShape(6.dp))
+            .focusable(interactionSource = interaction)
+            .keyDownClick { onClick() }
+            .clickable(interactionSource = interaction, indication = null) { onClick() }
+            .padding(horizontal = 10.dp, vertical = 2.dp),
+    ) {
+        lines.forEach { Text(it, color = Oled.textPrimary, fontSize = 10.sp, lineHeight = 12.sp) }
+    }
+}
+
+// Five rows as one focusable unit: the details scroll a few lines at a time inside the viewport
+@Composable
+fun StatChunk(rows: List<Pair<String, String>>, onClick: () -> Unit = {}) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (focused) Oled.rowFocused else Color.Transparent, RoundedCornerShape(6.dp))
+            .focusable(interactionSource = interaction)
+            .keyDownClick { onClick() }
+            .clickable(interactionSource = interaction, indication = null) { onClick() }
+            .padding(vertical = 2.dp),
+    ) {
+        rows.forEach { (label, value) -> StatRow(label, value) }
     }
 }
 
@@ -507,11 +547,17 @@ fun ConfirmDialog(
     confirmLabel: String,
     onConfirm: () -> Unit,
     onDismiss: () -> Unit,
+    extra: (@Composable () -> Unit)? = null,
 ) {
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(title, color = Oled.textPrimary) },
-        text = { Text(text, color = Oled.textSecondary) },
+        text = {
+            Column {
+                Text(text, color = Oled.textSecondary)
+                extra?.invoke()
+            }
+        },
         confirmButton = { TextButton(onClick = onConfirm) { Text(confirmLabel, color = Oled.textPrimary) } },
         dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel), color = Oled.textPrimary) } },
         containerColor = Oled.card,
@@ -549,7 +595,8 @@ fun AppOpPermRow(app: AppRecord, perm: PermissionEntry, scope: CoroutineScope, s
     ToggleRow(perm.label, granted, subtitle = perm.description, enabled = true) { want ->
         if (shizukuReady) {
             scope.launch {
-                val ok = onIo { Shell.appOpsSet(app.packageName, op, if (want) "allow" else "ignore").ok }
+                // this app's own app-ops restart it: they are not changed from here
+                val ok = app.packageName != context.packageName && onIo { Shell.appOpsSet(app.packageName, op, if (want) "allow" else "ignore").ok }
                 if (!ok) context.toast("Couldn't change ${perm.label}")
                 val fresh = onIo { AppInspector.loadAppOps(context.packageManager, app.packageName) }
                 app.appOps.clear()
@@ -608,4 +655,50 @@ fun BoostButton(enabled: Boolean, busy: Boolean = false, onClick: () -> Unit) {
         stringResource(R.string.boost_action),
         modifier = Modifier.alpha(if (busy) pulse else if (enabled) 1f else 0.5f),
     ) { if (enabled) onClick() }
+}
+
+// Long text in a dialog: a plain scrolling column of focusable paragraphs (no lazy list inside the dialog)
+@Composable
+fun ScrollableText(text: String, maxHeight: Dp) {
+    val paragraphs = remember(text) { text.split(Regex("\\n\\s*\\n")).map { it.trim() }.filter { it.isNotEmpty() } }
+    Column(modifier = Modifier.fillMaxWidth().heightIn(max = maxHeight).verticalScroll(rememberScrollState())) {
+        paragraphs.forEach { paragraph ->
+            val interaction = remember { MutableInteractionSource() }
+            val focused by interaction.collectIsFocusedAsState()
+            Text(
+                paragraph,
+                color = Oled.textSecondary, fontSize = 11.sp, lineHeight = 14.sp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(if (focused) Oled.rowFocused else Color.Transparent)
+                    .focusable(interactionSource = interaction)
+                    .padding(vertical = 2.dp),
+            )
+        }
+    }
+}
+
+/** A link in one line: its name, then its description. Compact, for long lists. */
+@Composable
+fun CompactLink(name: String, description: String, icon: ImageVector? = null, onClick: () -> Unit) {
+    val interaction = remember { MutableInteractionSource() }
+    val focused by interaction.collectIsFocusedAsState()
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(if (focused) Oled.rowFocused else Color.Transparent, RoundedCornerShape(6.dp))
+            .focusable(interactionSource = interaction)
+            .keyDownClick { onClick() }
+            .clickable(interactionSource = interaction, indication = null) { onClick() }
+            .padding(horizontal = 8.dp, vertical = 3.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(name, color = Oled.textPrimary, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(description, color = Oled.textSecondary, fontSize = 10.sp, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+        if (icon != null) {
+            Spacer(modifier = Modifier.width(8.dp))
+            Icon(icon, contentDescription = null, tint = Oled.textSecondary, modifier = Modifier.size(12.dp))
+        }
+    }
 }

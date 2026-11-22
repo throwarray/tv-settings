@@ -163,6 +163,10 @@ object SystemSettings {
 
     fun unknownSources(context: Context): Boolean = globalFlag(context, "install_non_market_apps")
 
-    fun setUnknownSources(context: Context, enabled: Boolean): Boolean =
-        put(context, "global", "install_non_market_apps", if (enabled) "1" else "0")
+    // Through the shell when Shizuku is up: this app then needs no WRITE_SECURE_SETTINGS for it, so no grant and no restart
+    fun setUnknownSources(context: Context, enabled: Boolean): Boolean {
+        val value = if (enabled) "1" else "0"
+        return if (ShizukuManager.isReady) Shell.settingsPut("global", "install_non_market_apps", value).ok
+        else put(context, "global", "install_non_market_apps", value)
+    }
 }
